@@ -1,0 +1,17 @@
+#!/bin/bash
+echo "Creating Python virtual environment..."
+python3 -m venv memu_env
+
+echo ""
+echo "Activating virtual environment..."
+source memu_env/bin/activate
+
+echo ""
+echo "Installing required packages..."
+pip install --upgrade pip
+pip install -r requirements.txt
+
+echo ""
+echo "Setup complete! Virtual environment is activated."
+echo "To activate in the future, run: source memu_env/bin/activate"
+
