@@ -18,7 +18,7 @@ A modular Python package for controlling MEmu emulators using `pymemuc`. This pa
 
 - Python 3.7 or higher
 - MEmu Play installed on your system
-- ADB (Android Debug Bridge) installed and accessible in PATH (usually comes with Android SDK)
+- ADB (Android Debug Bridge) - **Included in this repository** in the `platform-tools/` folder, or can be installed separately
 
 ## Installation
 
@@ -50,7 +50,15 @@ source memu_env/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Verify MEmu Installation
+### 2. ADB Configuration
+
+**ADB is included in this repository** in the `platform-tools/` folder. The package will automatically detect and use it. No additional configuration is needed.
+
+If you prefer to use a system-wide ADB installation:
+- Make sure ADB is in your system PATH, or
+- Configure the ADB path manually (see Configuration section below)
+
+### 3. Verify MEmu Installation
 
 Make sure MEmu Play is installed and `memuc.exe` is accessible. The `pymemuc` library will attempt to auto-detect the MEmu installation path.
 
@@ -66,6 +74,9 @@ memu_emulator/
 │   ├── adb_manager.py       # ADB operations
 │   ├── input_manager.py     # Input and gesture control
 │   └── image_utils.py       # Image processing utilities
+├── platform-tools/          # ADB tools (included)
+│   ├── adb.exe              # Android Debug Bridge
+│   └── ...                  # ADB support files
 ├── examples/                 # Example scripts
 │   ├── basic_usage.py       # Basic operations example
 │   ├── advanced_usage.py    # Advanced operations example
@@ -191,10 +202,30 @@ Configuration class for customizing controller behavior.
 #### Attributes
 
 - `memuc_path` - Path to memuc.exe (None for auto-detect)
+- `adb_path` - Path to adb.exe (None for auto-detect, checks local `platform-tools/` folder first)
 - `default_vm_name` - Default name for created VMs
 - `auto_start` - Automatically start VMs after creation
 - `timeout` - Default timeout for operations (seconds)
 - `adb_port_base` - Base port for ADB connections
+
+#### ADB Auto-Detection
+
+The package automatically detects ADB in the following order:
+1. **Local `platform-tools/` folder** (included in repository) - **Highest priority**
+2. System PATH
+3. MEmu installation directory
+4. Android SDK platform-tools directory
+
+You can also manually specify the ADB path:
+
+```python
+from memu_controller import MemuController, MemuConfig
+
+config = MemuConfig(
+    adb_path="C:/path/to/adb.exe"  # Custom ADB path
+)
+controller = MemuController(config=config)
+```
 
 ### VMManager
 
@@ -331,9 +362,11 @@ controller.execute_adb_command(
 ### ADB Connection Fails
 
 - Ensure the VM is fully booted before connecting
-- Check that ADB is installed and in PATH
+- **ADB is included in the repository** - the package will auto-detect it from `platform-tools/` folder
+- If using system ADB, check that ADB is installed and in PATH
 - Verify the ADB port (default: 21503 + VM index)
 - Try manually connecting: `adb connect 127.0.0.1:21503`
+- Check that the `platform-tools/adb.exe` file exists in the project root
 
 ### VM Not Starting
 
