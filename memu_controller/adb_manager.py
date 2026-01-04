@@ -315,7 +315,7 @@ class ADBManager:
             return None
 
 
-    def take_screenshot_bytes(self, vm_index: int, base_port: int = 5555) -> Optional[bytes]:
+    def take_screenshot_bytes(self, vm_index: int, base_port: int = 5555, refresh_display: bool = True) -> Optional[bytes]:
         """
         Take a screenshot and return as bytes.
 
@@ -325,6 +325,10 @@ class ADBManager:
             Index of the BlueStacks instance.
         base_port : int, optional
             Base port number. Default is 5555.
+        refresh_display : bool, optional
+            Whether to refresh the display before taking screenshot. 
+            If False, takes screenshot without any interactions (no wakeup, no swipe).
+            Default is True for backward compatibility.
 
         Returns
         -------
@@ -332,18 +336,21 @@ class ADBManager:
             Screenshot image as bytes, or None if failed.
         """
         port = self.get_adb_port(vm_index, base_port)
-        # Wake up screen and force refresh before taking screenshot
-        # This is especially important for multi-monitor setups where BlueStacks might not update framebuffer
-        # Note: We avoid sending BACK/HOME keys as they would close the current app
-        try:
-            # Force screen update by toggling display
-            refresh_cmd = [self.adb_path, "-s", f"127.0.0.1:{port}", "shell", "input", "keyevent", "KEYCODE_WAKEUP"]
-            subprocess.run(refresh_cmd, capture_output=True, timeout=5)
-            # Small swipe to trigger screen refresh (minimal movement to avoid app interaction)
-            swipe_cmd = [self.adb_path, "-s", f"127.0.0.1:{port}", "shell", "input", "swipe", "100", "100", "101", "101", "50"]
-            subprocess.run(swipe_cmd, capture_output=True, timeout=5)
-        except Exception as e:
-            pass  # Ignore refresh errors, continue with screenshot
+        
+        # Only refresh display if requested (for non-interactive screenshots, skip this)
+        if refresh_display:
+            # Wake up screen and force refresh before taking screenshot
+            # This is especially important for multi-monitor setups where BlueStacks might not update framebuffer
+            # Note: We avoid sending BACK/HOME keys as they would close the current app
+            try:
+                # Force screen update by toggling display
+                refresh_cmd = [self.adb_path, "-s", f"127.0.0.1:{port}", "shell", "input", "keyevent", "KEYCODE_WAKEUP"]
+                subprocess.run(refresh_cmd, capture_output=True, timeout=5)
+                # Small swipe to trigger screen refresh (minimal movement to avoid app interaction)
+                swipe_cmd = [self.adb_path, "-s", f"127.0.0.1:{port}", "shell", "input", "swipe", "100", "100", "101", "101", "50"]
+                subprocess.run(swipe_cmd, capture_output=True, timeout=5)
+            except Exception as e:
+                pass  # Ignore refresh errors, continue with screenshot
         # Try multiple screenshot methods to work around BlueStacks rendering issues
         # Based on research: BlueStacks may have issues with carriage returns and display IDs
         

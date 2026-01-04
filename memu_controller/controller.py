@@ -352,7 +352,7 @@ class BlueStacksController:
             self.config.adb_port_base
         )
 
-    def take_screenshot_image(self, vm_index: int) -> Optional[Image.Image]:
+    def take_screenshot_image(self, vm_index: int, refresh_display: bool = True) -> Optional[Image.Image]:
         """
         Take a screenshot and return as PIL Image.
 
@@ -360,6 +360,10 @@ class BlueStacksController:
         ----------
         vm_index : int
             Index of the BlueStacks instance.
+        refresh_display : bool, optional
+            Whether to refresh the display before taking screenshot.
+            If False, takes screenshot without any interactions (no wakeup, no swipe).
+            Default is True for backward compatibility.
 
         Returns
         -------
@@ -368,7 +372,8 @@ class BlueStacksController:
         """
         screenshot_bytes = self.adb_manager.take_screenshot_bytes(
             vm_index,
-            self.config.adb_port_base
+            self.config.adb_port_base,
+            refresh_display=refresh_display
         )
         if screenshot_bytes:
             return self.image_processor.load_from_bytes(screenshot_bytes)
