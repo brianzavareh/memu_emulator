@@ -12,9 +12,9 @@ This guide will help you get started with automating games in BlueStacks emulato
 
 ```bash
 # Activate virtual environment
-memu_env\Scripts\activate  # Windows
+android_env\Scripts\activate  # Windows
 # or
-source memu_env/bin/activate  # Linux/Mac
+source android_env/bin/activate  # Linux/Mac
 
 # Install dependencies
 pip install -r requirements.txt
@@ -25,7 +25,7 @@ pip install -r requirements.txt
 ### 1. Connect to Your VM
 
 ```python
-from memu_controller import BlueStacksController
+from android_controller import BlueStacksController
 
 controller = BlueStacksController()
 
@@ -122,7 +122,7 @@ project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from memu_controller import BlueStacksController, ImageProcessor
+from android_controller import BlueStacksController, ImageProcessor
 
 def game_bot(controller: BlueStacksController, vm_index: int):
     """Simple game automation bot."""
@@ -208,7 +208,7 @@ if __name__ == "__main__":
 ## Advanced: Color-Based Detection
 
 ```python
-from memu_controller import ImageProcessor
+from android_controller import ImageProcessor
 
 # Take screenshot
 screenshot = controller.take_screenshot_image(vm_index)
@@ -247,6 +247,6 @@ python tests/test_screenshot_gestures.py
 ## Next Steps
 
 - Check `examples/game_automation.py` for more examples
-- Explore `memu_controller/image_utils.py` for advanced image processing
+- Explore `android_controller/image_utils.py` for advanced image processing
 - Customize the automation logic for your specific game
 

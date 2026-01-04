@@ -14,12 +14,12 @@ import re
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any
 
-# Add project root to Python path to allow importing memu_controller
+# Add project root to Python path to allow importing android_controller
 project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from memu_controller import BlueStacksController
+from android_controller import BlueStacksController
 
 controller = BlueStacksController()
 vm_index = 0  # Your BlueStacks instance index

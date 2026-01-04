@@ -38,13 +38,13 @@ chmod +x setup_env.sh
 **Manual Setup:**
 ```bash
 # Create virtual environment
-python -m venv memu_env
+python -m venv android_env
 
 # Activate virtual environment
 # Windows:
-memu_env\Scripts\activate
+android_env\Scripts\activate
 # Linux/Mac:
-source memu_env/bin/activate
+source android_env/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
@@ -65,8 +65,8 @@ Make sure BlueStacks is installed and running. BlueStacks instances must be crea
 ## Project Structure
 
 ```
-memu_emulator/
-├── memu_controller/          # Main package
+android_emulator/
+├── android_controller/          # Main package
 │   ├── __init__.py          # Package initialization
 │   ├── config.py            # Configuration management
 │   ├── controller.py        # Main controller class
@@ -96,7 +96,7 @@ memu_emulator/
 ### Basic Usage
 
 ```python
-from memu_controller import BlueStacksController
+from android_controller import BlueStacksController
 
 # Create controller
 controller = BlueStacksController()
@@ -124,7 +124,7 @@ controller.disconnect_adb(vm_index)
 ### Custom Configuration
 
 ```python
-from memu_controller import BlueStacksController, BlueStacksConfig
+from android_controller import BlueStacksController, BlueStacksConfig
 
 # Create custom configuration
 config = BlueStacksConfig(
@@ -216,7 +216,7 @@ The package automatically detects ADB in the following order:
 You can also manually specify the ADB path:
 
 ```python
-from memu_controller import BlueStacksController, BlueStacksConfig
+from android_controller import BlueStacksController, BlueStacksConfig
 
 config = BlueStacksConfig(
     adb_path="C:/path/to/adb.exe"  # Custom ADB path
@@ -282,7 +282,7 @@ controller.home(vm_index)
 ### Image Processing
 
 ```python
-from memu_controller import ImageProcessor
+from android_controller import ImageProcessor
 
 # Take screenshot
 screenshot = controller.take_screenshot_image(vm_index)
@@ -378,14 +378,14 @@ controller.execute_adb_command(
 
 This is a modular package designed for easy extension. You can:
 
-1. Add new modules in `memu_controller/`
+1. Add new modules in `android_controller/`
 2. Extend existing classes with new methods
 3. Create custom configuration options
 4. Add new example scripts
 
 ## License
 
-This project is provided as-is for controlling MEmu emulators programmatically.
+This project is provided as-is for controlling Android emulators programmatically.
 
 ## Acknowledgments
 

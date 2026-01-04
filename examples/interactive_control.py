@@ -7,12 +7,12 @@ This example provides an interactive command-line interface for controlling Blue
 import sys
 from pathlib import Path
 
-# Add project root to Python path to allow importing memu_controller
+# Add project root to Python path to allow importing android_controller
 project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from memu_controller import BlueStacksController, BlueStacksConfig
+from android_controller import BlueStacksController, BlueStacksConfig
 
 
 def print_menu():

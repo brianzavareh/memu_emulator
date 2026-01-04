@@ -13,10 +13,10 @@ project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from memu_controller import MemuController, ImageProcessor
+from android_controller import BlueStacksController, ImageProcessor
 
 
-def test_screenshot_capture(controller: MemuController, vm_index: int) -> bool:
+def test_screenshot_capture(controller: BlueStacksController, vm_index: int) -> bool:
     """Test screenshot capture functionality."""
     print("\n[TEST] Screenshot Capture")
     print("-" * 50)
@@ -56,7 +56,7 @@ def test_screenshot_capture(controller: MemuController, vm_index: int) -> bool:
     return True
 
 
-def test_screen_size(controller: MemuController, vm_index: int) -> bool:
+def test_screen_size(controller: BlueStacksController, vm_index: int) -> bool:
     """Test screen size detection."""
     print("\n[TEST] Screen Size Detection")
     print("-" * 50)
@@ -71,7 +71,7 @@ def test_screen_size(controller: MemuController, vm_index: int) -> bool:
         return False
 
 
-def test_tap_gesture(controller: MemuController, vm_index: int) -> bool:
+def test_tap_gesture(controller: BlueStacksController, vm_index: int) -> bool:
     """Test tap gesture."""
     print("\n[TEST] Tap Gesture")
     print("-" * 50)
@@ -96,7 +96,7 @@ def test_tap_gesture(controller: MemuController, vm_index: int) -> bool:
         return False
 
 
-def test_swipe_gesture(controller: MemuController, vm_index: int) -> bool:
+def test_swipe_gesture(controller: BlueStacksController, vm_index: int) -> bool:
     """Test swipe gesture."""
     print("\n[TEST] Swipe Gesture")
     print("-" * 50)
@@ -126,7 +126,7 @@ def test_swipe_gesture(controller: MemuController, vm_index: int) -> bool:
         return False
 
 
-def test_long_press(controller: MemuController, vm_index: int) -> bool:
+def test_long_press(controller: BlueStacksController, vm_index: int) -> bool:
     """Test long press gesture."""
     print("\n[TEST] Long Press Gesture")
     print("-" * 50)
@@ -151,7 +151,7 @@ def test_long_press(controller: MemuController, vm_index: int) -> bool:
         return False
 
 
-def test_navigation_buttons(controller: MemuController, vm_index: int) -> bool:
+def test_navigation_buttons(controller: BlueStacksController, vm_index: int) -> bool:
     """Test navigation button presses."""
     print("\n[TEST] Navigation Buttons")
     print("-" * 50)
@@ -190,7 +190,7 @@ def test_navigation_buttons(controller: MemuController, vm_index: int) -> bool:
     return tests_passed == total_tests
 
 
-def test_image_processing(controller: MemuController, vm_index: int) -> bool:
+def test_image_processing(controller: BlueStacksController, vm_index: int) -> bool:
     """Test image processing utilities."""
     print("\n[TEST] Image Processing")
     print("-" * 50)
@@ -233,10 +233,10 @@ def test_image_processing(controller: MemuController, vm_index: int) -> bool:
 def run_all_tests():
     """Run all tests."""
     print("=" * 60)
-    print("MEmu Screenshot and Gesture Test Suite")
+    print("Android Emulator Screenshot and Gesture Test Suite")
     print("=" * 60)
     
-    controller = MemuController()
+    controller = BlueStacksController()
     
     # List VMs
     vms = controller.list_vms()

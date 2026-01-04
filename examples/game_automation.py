@@ -14,7 +14,7 @@ project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from memu_controller import BlueStacksController, ImageProcessor
+from android_controller import BlueStacksController, ImageProcessor
 from PIL import Image
 
 
