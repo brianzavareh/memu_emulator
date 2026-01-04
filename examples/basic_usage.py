@@ -10,7 +10,9 @@ import xml.etree.ElementTree as ET
 import tempfile
 import os
 import subprocess
+import re
 from pathlib import Path
+from typing import List, Dict, Optional, Tuple, Any
 
 # Add project root to Python path to allow importing memu_controller
 project_root = Path(__file__).parent.parent
@@ -97,34 +99,113 @@ if pull_result.returncode != 0:
 else:
     print(f"UI dump saved to {local_dump_path}")
     
-    # Parse XML and extract all text
+    # Parse XML and extract all text with coordinates
     try:
         tree = ET.parse(local_dump_path)
         root = tree.getroot()
         
-        # Extract all text from nodes
-        all_text = []
+        def parse_bounds(bounds_str: str) -> Optional[Tuple[int, int, int, int]]:
+            """
+            Parse bounds string in format [x1,y1][x2,y2] to (x1, y1, x2, y2).
+            
+            Parameters
+            ----------
+            bounds_str : str
+                Bounds string from UI Automator XML.
+            
+            Returns
+            -------
+            Optional[Tuple[int, int, int, int]]
+                Tuple of (x1, y1, x2, y2) or None if parsing fails.
+            """
+            if not bounds_str:
+                return None
+            # Match pattern [x1,y1][x2,y2]
+            match = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds_str)
+            if match:
+                return tuple(map(int, match.groups()))
+            return None
+        
+        def get_center(bounds: Tuple[int, int, int, int]) -> Tuple[int, int]:
+            """
+            Calculate center point of bounds rectangle.
+            
+            Parameters
+            ----------
+            bounds : Tuple[int, int, int, int]
+                Bounds as (x1, y1, x2, y2).
+            
+            Returns
+            -------
+            Tuple[int, int]
+                Center point as (x, y).
+            """
+            x1, y1, x2, y2 = bounds
+            return ((x1 + x2) // 2, (y1 + y2) // 2)
+        
+        # Extract all text elements with their coordinates
+        text_elements: List[Dict[str, Any]] = []
+        seen_texts = set()  # To avoid duplicates
+        
         for node in root.iter():
             # Get text attribute
             text = node.get('text', '').strip()
-            if text:
-                all_text.append(text)
+            bounds_str = node.get('bounds', '')
+            bounds = parse_bounds(bounds_str)
+            
+            if text and bounds:
+                # Create unique key to avoid exact duplicates
+                text_key = f"{text}_{bounds}"
+                if text_key not in seen_texts:
+                    seen_texts.add(text_key)
+                    center = get_center(bounds)
+                    text_elements.append({
+                        'text': text,
+                        'bounds': bounds,
+                        'center': center,
+                        'source': 'text'
+                    })
             
             # Get content-desc attribute (often used for accessibility)
             content_desc = node.get('content-desc', '').strip()
-            if content_desc and content_desc not in all_text:
-                all_text.append(content_desc)
+            if content_desc and bounds:
+                # Create unique key to avoid exact duplicates
+                desc_key = f"{content_desc}_{bounds}"
+                if desc_key not in seen_texts:
+                    seen_texts.add(desc_key)
+                    center = get_center(bounds)
+                    text_elements.append({
+                        'text': content_desc,
+                        'bounds': bounds,
+                        'center': center,
+                        'source': 'content-desc'
+                    })
         
-        # Print all found text
-        print("\n" + "="*60)
-        print("All text found in current window:")
-        print("="*60)
-        if all_text:
-            for i, text in enumerate(all_text, 1):
-                print(f"{i}. {text}")
+        # Print all found text with coordinates
+        print("\n" + "="*80)
+        print("All text found in current window (with coordinates):")
+        print("="*80)
+        if text_elements:
+            for i, elem in enumerate(text_elements, 1):
+                x1, y1, x2, y2 = elem['bounds']
+                center_x, center_y = elem['center']
+                print(f"\n{i}. Text: \"{elem['text']}\"")
+                print(f"   Bounds: [{x1},{y1}][{x2},{y2}] (width: {x2-x1}, height: {y2-y1})")
+                print(f"   Center: ({center_x}, {center_y})")
+                print(f"   Source: {elem['source']}")
+                print(f"   Click command: controller.tap({vm_index}, {center_x}, {center_y})")
+            
+            # Summary section with all coordinates in compact format
+            print("\n" + "="*80)
+            print("SUMMARY - Quick Reference for Clicking:")
+            print("="*80)
+            for i, elem in enumerate(text_elements, 1):
+                center_x, center_y = elem['center']
+                print(f"{i:3d}. \"{elem['text'][:40]:<40}\" -> tap({vm_index}, {center_x:4d}, {center_y:4d})")
+            print("="*80)
         else:
             print("No text elements found in the UI hierarchy.")
-        print("="*60)
+            print("="*80)
         
         # Clean up local dump file
         try:
@@ -139,3 +220,21 @@ else:
         print(f"Error parsing UI dump XML: {e}")
     except Exception as e:
         print(f"Error extracting text: {e}")
+
+# Find and tap on "Color Flood" text using the modular function
+print("\n" + "="*80)
+print("Finding and tapping on 'Color Flood' text...")
+print("="*80)
+if controller.find_and_tap_text(vm_index, "Color Flood"):
+    print("Successfully tapped on 'Color Flood'!")
+else:
+    print("Could not find 'Color Flood' text in the UI.")
+    # Try to find coordinates for debugging
+    coords = controller.find_text_coordinates(vm_index, "Color Flood")
+    if coords:
+        print(f"Found 'Color Flood' at center: {coords['center']}")
+        print(f"Bounds: {coords['bounds']}")
+        print("Attempting manual tap...")
+        controller.tap(vm_index, coords['center'][0], coords['center'][1])
+    else:
+        print("Text 'Color Flood' not found in UI hierarchy.")

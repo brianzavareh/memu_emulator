@@ -13,6 +13,7 @@ from memu_controller.adb_manager import ADBManager
 from memu_controller.input_manager import InputManager
 from memu_controller.image_utils import ImageProcessor
 from memu_controller.coordinate_utils import CoordinateConverter
+from memu_controller.ui_utils import find_text_coordinates
 from PIL import Image
 
 
@@ -694,6 +695,112 @@ class BlueStacksController:
             center = self.image_processor.get_center(bbox)
             return self.tap(vm_index, center[0], center[1])
         return False
+
+    def find_and_tap_text(
+        self,
+        vm_index: int,
+        text_to_find: str,
+        exact_match: bool = False,
+        case_sensitive: bool = False
+    ) -> bool:
+        """
+        Find text in the UI and tap on it.
+
+        Uses UI Automator to dump the UI hierarchy, find the specified text,
+        and tap on its center coordinates.
+
+        Parameters
+        ----------
+        vm_index : int
+            Index of the BlueStacks instance.
+        text_to_find : str
+            Text to search for in the UI.
+        exact_match : bool, optional
+            If True, requires exact match. If False, matches if text contains
+            the search string. Default is False.
+        case_sensitive : bool, optional
+            Whether the search should be case sensitive. Default is False.
+
+        Returns
+        -------
+        bool
+            True if text was found and tapped, False otherwise.
+
+        Examples
+        --------
+        >>> # Tap on text containing "Color Flood"
+        >>> controller.find_and_tap_text(0, "Color Flood")
+        >>> # Tap on exact text match
+        >>> controller.find_and_tap_text(0, "Play", exact_match=True)
+        >>> # Case-sensitive search
+        >>> controller.find_and_tap_text(0, "Settings", case_sensitive=True)
+        """
+        adb_path = self.adb_manager.adb_path
+        adb_port = self.config.get_adb_port(vm_index)
+
+        text_element = find_text_coordinates(
+            vm_index=vm_index,
+            text_to_find=text_to_find,
+            adb_path=adb_path,
+            adb_port=adb_port,
+            exact_match=exact_match,
+            case_sensitive=case_sensitive
+        )
+
+        if text_element:
+            center_x, center_y = text_element['center']
+            return self.tap(vm_index, center_x, center_y)
+        return False
+
+    def find_text_coordinates(
+        self,
+        vm_index: int,
+        text_to_find: str,
+        exact_match: bool = False,
+        case_sensitive: bool = False
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Find coordinates of a text element in the UI without performing any action.
+
+        Uses UI Automator to dump the UI hierarchy and find the specified text.
+
+        Parameters
+        ----------
+        vm_index : int
+            Index of the BlueStacks instance.
+        text_to_find : str
+            Text to search for in the UI.
+        exact_match : bool, optional
+            If True, requires exact match. If False, matches if text contains
+            the search string. Default is False.
+        case_sensitive : bool, optional
+            Whether the search should be case sensitive. Default is False.
+
+        Returns
+        -------
+        Optional[Dict[str, Any]]
+            Dictionary containing text element info with coordinates, or None if not found.
+            Contains: 'text', 'bounds', 'center', 'source'
+
+        Examples
+        --------
+        >>> # Find coordinates of text
+        >>> coords = controller.find_text_coordinates(0, "Color Flood")
+        >>> if coords:
+        ...     print(f"Found at: {coords['center']}")
+        ...     controller.tap(0, coords['center'][0], coords['center'][1])
+        """
+        adb_path = self.adb_manager.adb_path
+        adb_port = self.config.get_adb_port(vm_index)
+
+        return find_text_coordinates(
+            vm_index=vm_index,
+            text_to_find=text_to_find,
+            adb_path=adb_path,
+            adb_port=adb_port,
+            exact_match=exact_match,
+            case_sensitive=case_sensitive
+        )
 
     def tap_on_screenshot(
         self,
