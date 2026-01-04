@@ -9,6 +9,7 @@ from typing import Optional, Tuple, List, Dict, Any
 import numpy as np
 from PIL import Image
 import io
+import os
 import cv2
 
 
@@ -35,53 +36,49 @@ class ImageProcessor:
         Optional[Image.Image]
             PIL Image object, or None if loading failed.
         """
-        # #region agent log
-        import json
-        import time
-        log_path = r"c:\Users\erfan\Downloads\memu_emulator\.cursor\debug.log"
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"sessionId": "debug-session", "runId": "post-fix", "hypothesisId": "F", "location": "image_utils.py:38", "message": "load_from_bytes entry", "data": {"bytes_length": len(image_bytes), "first_8_bytes": image_bytes[:8].hex() if len(image_bytes) >= 8 else image_bytes.hex()}, "timestamp": int(time.time() * 1000)}) + "\n")
-        # #endregion
+        # Try multiple loading methods
+        img = None
+        method1_error = None
+        method2_error = None
+        method3_error = None
+        
         try:
-            img = Image.open(io.BytesIO(image_bytes))
-            # #region agent log
-            # Get image stats
-            img_stats = {
-                "size": img.size,
-                "mode": img.mode,
-                "format": img.format,
-            }
-            # Check if image is all white (handle RGB and RGBA)
-            if img.mode in ("RGB", "RGBA"):
-                # Convert RGBA to RGB for white check if needed
-                check_img = img.convert("RGB") if img.mode == "RGBA" else img
-                # Sample a few pixels from different locations
-                sample_positions = [
-                    (0, 0), (img.size[0]//4, img.size[1]//4),
-                    (img.size[0]//2, img.size[1]//2),
-                    (3*img.size[0]//4, 3*img.size[1]//4),
-                    (img.size[0]-1, img.size[1]-1)
-                ]
-                pixels = [check_img.getpixel((x, y)) for x, y in sample_positions if x < img.size[0] and y < img.size[1]]
-                img_stats["sample_pixels"] = pixels
-                # Check if all sampled pixels are white (255, 255, 255)
-                is_white = all(p == (255, 255, 255) for p in pixels) if pixels else False
-                img_stats["is_white"] = is_white
-                # Also check average pixel value
-                if pixels:
-                    avg_r = sum(p[0] for p in pixels) / len(pixels)
-                    avg_g = sum(p[1] for p in pixels) / len(pixels)
-                    avg_b = sum(p[2] for p in pixels) / len(pixels)
-                    img_stats["avg_pixel"] = (avg_r, avg_g, avg_b)
-            with open(log_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps({"sessionId": "debug-session", "runId": "post-fix", "hypothesisId": "F", "location": "image_utils.py:52", "message": "Image loaded successfully", "data": img_stats, "timestamp": int(time.time() * 1000)}) + "\n")
-            # #endregion
+            # Method 1: Direct BytesIO
+            try:
+                img = Image.open(io.BytesIO(image_bytes))
+            except Exception as e1:
+                method1_error = str(e1)
+                # Method 2: Try OpenCV (more tolerant of PNG corruption)
+                try:
+                    import numpy as np
+                    nparr = np.frombuffer(image_bytes, np.uint8)
+                    img_cv = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                    if img_cv is not None:
+                        # Convert BGR to RGB for PIL
+                        img_cv_rgb = cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)
+                        img = Image.fromarray(img_cv_rgb)
+                    else:
+                        raise Exception("OpenCV failed to decode image")
+                except Exception as e2:
+                    method2_error = str(e2)
+                    # Method 3: Write to temp file and read (sometimes works better with corrupted PNGs)
+                    try:
+                        import tempfile
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_file:
+                            tmp_path = tmp_file.name
+                            tmp_file.write(image_bytes)
+                        img = Image.open(tmp_path)
+                        os.unlink(tmp_path)
+                    except Exception as e3:
+                        method3_error = str(e3)
+                        # All methods failed - return None
+                        return None
+            
+            # If we got here, img was successfully loaded by one of the methods
+            if img is None:
+                return None
             return img
         except Exception as e:
-            # #region agent log
-            with open(log_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps({"sessionId": "debug-session", "runId": "post-fix", "hypothesisId": "F", "location": "image_utils.py:56", "message": "Error loading image", "data": {"error": str(e), "error_type": type(e).__name__}, "timestamp": int(time.time() * 1000)}) + "\n")
-            # #endregion
             print(f"Error loading image from bytes: {e}")
             return None
 

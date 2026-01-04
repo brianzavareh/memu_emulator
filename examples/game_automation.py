@@ -14,11 +14,11 @@ project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from memu_controller import MemuController, ImageProcessor
+from memu_controller import BlueStacksController, ImageProcessor
 from PIL import Image
 
 
-def example_basic_screenshot_and_tap(controller: MemuController, vm_index: int):
+def example_basic_screenshot_and_tap(controller: BlueStacksController, vm_index: int):
     """Example: Take screenshot and perform basic tap."""
     print("\n=== Basic Screenshot and Tap ===")
     
@@ -47,7 +47,7 @@ def example_basic_screenshot_and_tap(controller: MemuController, vm_index: int):
         print("Failed to take screenshot")
 
 
-def example_swipe_gestures(controller: MemuController, vm_index: int):
+def example_swipe_gestures(controller: BlueStacksController, vm_index: int):
     """Example: Perform various swipe gestures."""
     print("\n=== Swipe Gestures ===")
     
@@ -79,7 +79,7 @@ def example_swipe_gestures(controller: MemuController, vm_index: int):
     time.sleep(1)
 
 
-def example_template_matching(controller: MemuController, vm_index: int, template_path: str):
+def example_template_matching(controller: BlueStacksController, vm_index: int, template_path: str):
     """Example: Find template in screenshot and tap on it."""
     print("\n=== Template Matching ===")
     
@@ -103,7 +103,7 @@ def example_template_matching(controller: MemuController, vm_index: int, templat
         print("Template not found in screenshot")
 
 
-def example_color_detection(controller: MemuController, vm_index: int):
+def example_color_detection(controller: BlueStacksController, vm_index: int):
     """Example: Find regions by color and interact with them."""
     print("\n=== Color Detection ===")
     
@@ -128,7 +128,7 @@ def example_color_detection(controller: MemuController, vm_index: int):
         print("No matching color regions found")
 
 
-def example_game_automation_loop(controller: MemuController, vm_index: int, iterations: int = 5):
+def example_game_automation_loop(controller: BlueStacksController, vm_index: int, iterations: int = 5):
     """Example: Simple automation loop for repetitive tasks."""
     print("\n=== Game Automation Loop ===")
     
@@ -163,33 +163,32 @@ def example_game_automation_loop(controller: MemuController, vm_index: int, iter
 
 def main():
     """Main function demonstrating game automation capabilities."""
-    print("=== MEmu Game Automation Example ===")
+    print("=== BlueStacks Game Automation Example ===")
     
     # Initialize controller
-    controller = MemuController()
+    controller = BlueStacksController()
     
-    # List VMs
-    print("\nListing VMs...")
-    vms = controller.list_vms()
-    if not vms:
-        print("No VMs found. Please create a VM first.")
+    # List BlueStacks instances
+    print("\nListing BlueStacks instances...")
+    instances = controller.list_vms()
+    if not instances:
+        print("No BlueStacks instances found. Please start BlueStacks first.")
         return
     
-    print(f"Found {len(vms)} VM(s):")
-    for vm in vms:
-        print(f"  - VM {vm.get('index')}: {vm.get('name', 'Unknown')}")
+    print(f"Found {len(instances)} instance(s):")
+    for instance in instances:
+        print(f"  - Instance {instance.get('index')}: {instance.get('name', 'Unknown')}")
     
-    # Get VM index (use first available or ask user)
-    if vms:
-        vm_index = vms[0].get('index')
-        print(f"\nUsing VM {vm_index}")
+    # Get instance index (use first available or ask user)
+    if instances:
+        vm_index = instances[0].get('index')
+        print(f"\nUsing instance {vm_index}")
         
-        # Check if VM is running
+        # Check if instance is running
         status = controller.get_vm_status(vm_index)
         if not status['running']:
-            print(f"VM {vm_index} is not running. Starting it...")
-            controller.start_vm(vm_index)
-            time.sleep(5)  # Wait for VM to boot
+            print(f"Instance {vm_index} is not running. Please start it manually in BlueStacks.")
+            return
         
         # Connect ADB if not connected
         if not status['adb_connected']:

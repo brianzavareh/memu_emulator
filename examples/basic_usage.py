@@ -1,12 +1,10 @@
 """
-Basic usage example for MEmu controller.
+Basic usage example for BlueStacks controller.
 
-This example demonstrates basic operations: creating, starting, and controlling a VM.
+This example demonstrates opening the Daily Logic Puzzles app and taking a screenshot.
 """
 
 import sys
-import json
-import time
 from pathlib import Path
 
 # Add project root to Python path to allow importing memu_controller
@@ -14,60 +12,60 @@ project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from memu_controller import MemuController
-# #region agent log
-log_path = r"c:\Users\erfan\Downloads\memu_emulator\.cursor\debug.log"
-with open(log_path, "a", encoding="utf-8") as f:
-    f.write(json.dumps({"sessionId": "debug-session", "runId": "post-fix", "hypothesisId": "C", "location": "basic_usage.py:17", "message": "Controller initialized", "data": {}, "timestamp": int(time.time() * 1000)}) + "\n")
-# #endregion
+from memu_controller import BlueStacksController
 
-controller = MemuController()
-vm_index = 0  # Your VM index
+controller = BlueStacksController()
+vm_index = 0  # Your BlueStacks instance index
 
-# #region agent log
 vm_status = controller.get_vm_status(vm_index)
-# Check screen state via ADB
-screen_state = None
-screen_size = None
-try:
-    screen_state_cmd = controller.execute_adb_command(vm_index, "dumpsys power | grep 'mScreenOn'")
-    screen_state = screen_state_cmd
-    screen_size = controller.get_screen_size(vm_index)
-except Exception as e:
-    screen_state = f"Error: {e}"
-with open(log_path, "a", encoding="utf-8") as f:
-    f.write(json.dumps({"sessionId": "debug-session", "runId": "post-fix", "hypothesisId": "G", "location": "basic_usage.py:23", "message": "VM status and screen check", "data": {"vm_status": vm_status, "screen_state": screen_state, "screen_size": screen_size}, "timestamp": int(time.time() * 1000)}) + "\n")
-# #endregion
 
-# #region agent log
-with open(log_path, "a", encoding="utf-8") as f:
-    f.write(json.dumps({"sessionId": "debug-session", "runId": "post-fix", "hypothesisId": "A", "location": "basic_usage.py:27", "message": "ADB path used", "data": {"adb_path": controller.adb_manager.adb_path}, "timestamp": int(time.time() * 1000)}) + "\n")
-# #endregion
+# Ensure BlueStacks instance is running and ADB is connected
+if not vm_status['running']:
+    print(f"BlueStacks instance {vm_index} is not running. Please start it manually in BlueStacks.")
+    exit(1)
 
-# Take screenshot
-# #region agent log
-with open(log_path, "a", encoding="utf-8") as f:
-    f.write(json.dumps({"sessionId": "debug-session", "runId": "post-fix", "hypothesisId": "B", "location": "basic_usage.py:31", "message": "Before take_screenshot_image", "data": {"vm_index": vm_index}, "timestamp": int(time.time() * 1000)}) + "\n")
-# #endregion
+if not vm_status['adb_connected']:
+    print("Connecting to VM via ADB...")
+    if not controller.connect_adb(vm_index):
+        print("Failed to connect via ADB. Please ensure VM is running.")
+        exit(1)
+    print("ADB connected successfully.")
+
+# Find and launch the Daily Logic Puzzles app
+print("Searching for Daily Logic Puzzles app...")
+all_packages = controller.execute_adb_command(vm_index, "pm list packages")
+if not all_packages:
+    print("Error: Could not list packages.")
+    exit(1)
+
+# Search for packages containing "logic" or "puzzle" in Python
+package_name = None
+for line in all_packages.strip().split('\n'):
+    if line.startswith('package:'):
+        pkg = line.replace('package:', '').strip().lower()
+        if 'logic' in pkg or 'puzzle' in pkg:
+            package_name = line.replace('package:', '').strip()
+            print(f"Found matching package: {package_name}")
+            break
+
+if not package_name:
+    print("Error: Could not find Daily Logic Puzzles app. Please ensure it is installed.")
+    exit(1)
+
+print("Launching Daily Logic Puzzles app...")
+launch_result = controller.execute_adb_command(
+    vm_index,
+    f"monkey -p {package_name} -c android.intent.category.LAUNCHER 1"
+)
+
+# Take screenshot immediately after launching app
+
+# Take screenshot of the app (uses Method 2: WAKEUP refresh)
+print("\nTaking screenshot of Daily Logic Puzzles app...")
 screenshot = controller.take_screenshot_image(vm_index)
-# #region agent log
-with open(log_path, "a", encoding="utf-8") as f:
-    f.write(json.dumps({"sessionId": "debug-session", "runId": "post-fix", "hypothesisId": "B", "location": "basic_usage.py:34", "message": "After take_screenshot_image", "data": {"screenshot_is_none": screenshot is None, "screenshot_type": type(screenshot).__name__ if screenshot else None}, "timestamp": int(time.time() * 1000)}) + "\n")
-# #endregion
 if screenshot is None:
-    # #region agent log
-    with open(log_path, "a", encoding="utf-8") as f:
-        f.write(json.dumps({"sessionId": "debug-session", "runId": "post-fix", "hypothesisId": "B", "location": "basic_usage.py:37", "message": "Screenshot is None - exiting", "data": {}, "timestamp": int(time.time() * 1000)}) + "\n")
-    # #endregion
     print("Error: Screenshot is None. Check logs for details.")
     exit(1)
+
 screenshot.save("game_screen.png")
-
-# Tap at coordinates
-controller.tap(vm_index, 500, 300)
-
-# Find and tap a button
-controller.tap_template(vm_index, "play_button.png", threshold=0.8)
-
-# Swipe gesture
-controller.swipe(vm_index, 100, 500, 900, 500, 500)
+print("Screenshot saved to game_screen.png")

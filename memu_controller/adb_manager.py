@@ -1,23 +1,22 @@
 """
 ADB (Android Debug Bridge) management module.
 
-This module handles ADB connections and operations for MEmu virtual machines.
+This module handles ADB connections and operations for BlueStacks instances.
 """
 
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict
 import subprocess
 import time
 import os
-import json
 import shutil
 from pathlib import Path
 
 
 class ADBManager:
     """
-    Manager class for ADB operations with MEmu VMs.
+    Manager class for ADB operations with BlueStacks instances.
 
-    This class provides methods to connect to VMs via ADB and execute
+    This class provides methods to connect to BlueStacks instances via ADB and execute
     ADB commands.
 
     Attributes
@@ -44,42 +43,45 @@ class ADBManager:
                 self.adb_path = found_path
             else:
                 # Auto-detect from common locations
-                from memu_controller.config import MemuConfig
-                detected_path = MemuConfig.find_adb_path()
+                from memu_controller.config import BlueStacksConfig
+                detected_path = BlueStacksConfig.find_adb_path()
                 if detected_path:
                     self.adb_path = detected_path
                 else:
                     # Fallback to "adb" (will fail with clear error)
                     self.adb_path = "adb"
 
-    def get_adb_port(self, vm_index: int, base_port: int = 21503) -> int:
+    def get_adb_port(self, vm_index: int, base_port: int = 5555) -> int:
         """
-        Calculate ADB port for a given VM index.
+        Calculate ADB port for a given BlueStacks instance.
 
         Parameters
         ----------
         vm_index : int
-            Index of the virtual machine.
+            Index of the BlueStacks instance.
         base_port : int, optional
-            Base port number. Default is 21503 (MEmu default).
+            Base port number. Default is 5555 (BlueStacks default).
 
         Returns
         -------
         int
-            ADB port number for the VM.
+            ADB port number for the instance.
         """
+        # BlueStacks typically uses 5555 for the first instance
+        if vm_index == 0:
+            return base_port
         return base_port + vm_index
 
-    def connect(self, vm_index: int, base_port: int = 21503) -> bool:
+    def connect(self, vm_index: int, base_port: int = 5555) -> bool:
         """
-        Connect to a VM via ADB.
+        Connect to a BlueStacks instance via ADB.
 
         Parameters
         ----------
         vm_index : int
-            Index of the virtual machine.
+            Index of the BlueStacks instance.
         base_port : int, optional
-            Base port number. Default is 21503.
+            Base port number. Default is 5555.
 
         Returns
         -------
@@ -99,16 +101,16 @@ class ADBManager:
             print(f"Error connecting to VM {vm_index} via ADB: {e}")
             return False
 
-    def disconnect(self, vm_index: int, base_port: int = 21503) -> bool:
+    def disconnect(self, vm_index: int, base_port: int = 5555) -> bool:
         """
-        Disconnect from a VM via ADB.
+        Disconnect from a BlueStacks instance via ADB.
 
         Parameters
         ----------
         vm_index : int
-            Index of the virtual machine.
+            Index of the BlueStacks instance.
         base_port : int, optional
-            Base port number. Default is 21503.
+            Base port number. Default is 5555.
 
         Returns
         -------
@@ -128,18 +130,18 @@ class ADBManager:
             print(f"Error disconnecting from VM {vm_index} via ADB: {e}")
             return False
 
-    def execute_command(self, vm_index: int, command: str, base_port: int = 21503) -> Optional[str]:
+    def execute_command(self, vm_index: int, command: str, base_port: int = 5555) -> Optional[str]:
         """
-        Execute an ADB shell command on a VM.
+        Execute an ADB shell command on a BlueStacks instance.
 
         Parameters
         ----------
         vm_index : int
-            Index of the virtual machine.
+            Index of the BlueStacks instance.
         command : str
             ADB shell command to execute.
         base_port : int, optional
-            Base port number. Default is 21503.
+            Base port number. Default is 5555.
 
         Returns
         -------
@@ -163,18 +165,18 @@ class ADBManager:
             print(f"Error executing ADB command on VM {vm_index}: {e}")
             return None
 
-    def install_apk(self, vm_index: int, apk_path: str, base_port: int = 21503) -> bool:
+    def install_apk(self, vm_index: int, apk_path: str, base_port: int = 5555) -> bool:
         """
-        Install an APK on a VM.
+        Install an APK on a BlueStacks instance.
 
         Parameters
         ----------
         vm_index : int
-            Index of the virtual machine.
+            Index of the BlueStacks instance.
         apk_path : str
             Path to the APK file to install.
         base_port : int, optional
-            Base port number. Default is 21503.
+            Base port number. Default is 5555.
 
         Returns
         -------
@@ -219,18 +221,18 @@ class ADBManager:
             print(f"Error getting connected devices: {e}")
             return []
 
-    def wait_for_device(self, vm_index: int, timeout: int = 60, base_port: int = 21503) -> bool:
+    def wait_for_device(self, vm_index: int, timeout: int = 60, base_port: int = 5555) -> bool:
         """
-        Wait for a device to be available via ADB.
+        Wait for a BlueStacks instance to be available via ADB.
 
         Parameters
         ----------
         vm_index : int
-            Index of the virtual machine.
+            Index of the BlueStacks instance.
         timeout : int, optional
             Maximum time to wait in seconds. Default is 60.
         base_port : int, optional
-            Base port number. Default is 21503.
+            Base port number. Default is 5555.
 
         Returns
         -------
@@ -249,18 +251,20 @@ class ADBManager:
 
         return False
 
-    def take_screenshot(self, vm_index: int, save_path: Optional[str] = None, base_port: int = 21503) -> Optional[str]:
+    def take_screenshot(self, vm_index: int, save_path: Optional[str] = None, base_port: int = 5555) -> Optional[str]:
         """
-        Take a screenshot of the VM screen.
+        Take a screenshot of the BlueStacks instance screen.
+        
+        Uses WAKEUP refresh method to ensure the display buffer is refreshed before capturing.
 
         Parameters
         ----------
         vm_index : int
-            Index of the virtual machine.
+            Index of the BlueStacks instance.
         save_path : Optional[str], optional
             Path to save the screenshot. If None, saves to /sdcard/screenshot.png on device.
         base_port : int, optional
-            Base port number. Default is 21503.
+            Base port number. Default is 5555.
 
         Returns
         -------
@@ -273,6 +277,10 @@ class ADBManager:
         device_path = save_path or "/sdcard/screenshot.png"
         
         try:
+            # Method 2 approach: Use WAKEUP to refresh display buffer (works with BlueStacks)
+            refresh_cmd = [self.adb_path, "-s", f"127.0.0.1:{port}", "shell", "input", "keyevent", "KEYCODE_WAKEUP"]
+            subprocess.run(refresh_cmd, capture_output=True, timeout=5)
+            
             # Take screenshot on device
             result = subprocess.run(
                 [self.adb_path, "-s", f"127.0.0.1:{port}", "shell", "screencap", "-p", device_path],
@@ -306,123 +314,129 @@ class ADBManager:
             print(f"Error taking screenshot on VM {vm_index}: {e}")
             return None
 
-    def take_screenshot_bytes(self, vm_index: int, base_port: int = 21503) -> Optional[bytes]:
+
+    def take_screenshot_bytes(self, vm_index: int, base_port: int = 5555) -> Optional[bytes]:
         """
         Take a screenshot and return as bytes.
 
         Parameters
         ----------
         vm_index : int
-            Index of the virtual machine.
+            Index of the BlueStacks instance.
         base_port : int, optional
-            Base port number. Default is 21503.
+            Base port number. Default is 5555.
 
         Returns
         -------
         Optional[bytes]
             Screenshot image as bytes, or None if failed.
         """
-        # #region agent log
-        log_path = r"c:\Users\erfan\Downloads\memu_emulator\.cursor\debug.log"
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"sessionId": "debug-session", "runId": "post-fix", "hypothesisId": "A", "location": "adb_manager.py:308", "message": "take_screenshot_bytes entry", "data": {"vm_index": vm_index, "base_port": base_port, "adb_path": self.adb_path, "adb_path_exists": os.path.exists(self.adb_path) if self.adb_path != "adb" else None}, "timestamp": int(time.time() * 1000)}) + "\n")
-        # #endregion
         port = self.get_adb_port(vm_index, base_port)
-        # Wake up screen before taking screenshot
-        # #region agent log
-        log_path = r"c:\Users\erfan\Downloads\memu_emulator\.cursor\debug.log"
+        # Wake up screen and force refresh before taking screenshot
+        # This is especially important for multi-monitor setups where BlueStacks might not update framebuffer
+        # Note: We avoid sending BACK/HOME keys as they would close the current app
         try:
-            # Send key event to wake screen (KEYCODE_WAKEUP = 224)
-            wake_cmd = [self.adb_path, "-s", f"127.0.0.1:{port}", "shell", "input", "keyevent", "224"]
-            wake_result = subprocess.run(wake_cmd, capture_output=True, timeout=5)
-            with open(log_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps({"sessionId": "debug-session", "runId": "post-fix", "hypothesisId": "G", "location": "adb_manager.py:335", "message": "Screen wake attempt", "data": {"returncode": wake_result.returncode, "stderr": wake_result.stderr.decode("utf-8", errors="replace") if wake_result.stderr else None}, "timestamp": int(time.time() * 1000)}) + "\n")
-            time.sleep(0.5)  # Brief wait for screen to wake
+            # Force screen update by toggling display
+            refresh_cmd = [self.adb_path, "-s", f"127.0.0.1:{port}", "shell", "input", "keyevent", "KEYCODE_WAKEUP"]
+            subprocess.run(refresh_cmd, capture_output=True, timeout=5)
+            # Small swipe to trigger screen refresh (minimal movement to avoid app interaction)
+            swipe_cmd = [self.adb_path, "-s", f"127.0.0.1:{port}", "shell", "input", "swipe", "100", "100", "101", "101", "50"]
+            subprocess.run(swipe_cmd, capture_output=True, timeout=5)
         except Exception as e:
-            with open(log_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps({"sessionId": "debug-session", "runId": "post-fix", "hypothesisId": "G", "location": "adb_manager.py:340", "message": "Screen wake error", "data": {"error": str(e)}, "timestamp": int(time.time() * 1000)}) + "\n")
-            pass  # Ignore wake errors, continue with screenshot
-        # #endregion
-        # #region agent log
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"sessionId": "debug-session", "runId": "post-fix", "hypothesisId": "D", "location": "adb_manager.py:312", "message": "ADB port calculated", "data": {"port": port, "vm_index": vm_index, "base_port": base_port}, "timestamp": int(time.time() * 1000)}) + "\n")
-        # #endregion
-        # #region agent log
-        adb_exists_check = shutil.which(self.adb_path) if self.adb_path == "adb" else os.path.exists(self.adb_path)
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"sessionId": "debug-session", "runId": "post-fix", "hypothesisId": "A", "location": "adb_manager.py:316", "message": "ADB path check", "data": {"adb_path": self.adb_path, "adb_exists": adb_exists_check, "which_result": shutil.which(self.adb_path) if self.adb_path == "adb" else None}, "timestamp": int(time.time() * 1000)}) + "\n")
-        # #endregion
-        # #region agent log
-        devices = self.get_connected_devices()
-        device_address = f"127.0.0.1:{port}"
-        is_connected = device_address in devices
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"sessionId": "debug-session", "runId": "post-fix", "hypothesisId": "B", "location": "adb_manager.py:322", "message": "ADB connection status", "data": {"devices": devices, "target_device": device_address, "is_connected": is_connected}, "timestamp": int(time.time() * 1000)}) + "\n")
-        # #endregion
-        cmd = [self.adb_path, "-s", f"127.0.0.1:{port}", "exec-out", "screencap", "-p"]
-        # #region agent log
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"sessionId": "debug-session", "runId": "post-fix", "hypothesisId": "A", "location": "adb_manager.py:327", "message": "Before subprocess.run", "data": {"command": cmd}, "timestamp": int(time.time() * 1000)}) + "\n")
-        # #endregion
+            pass  # Ignore refresh errors, continue with screenshot
+        # Try multiple screenshot methods to work around BlueStacks rendering issues
+        # Based on research: BlueStacks may have issues with carriage returns and display IDs
+        
+        # First, check for available displays
+        display_id = None
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                timeout=10
-            )
-            # #region agent log
-            with open(log_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps({"sessionId": "debug-session", "runId": "post-fix", "hypothesisId": "E", "location": "adb_manager.py:336", "message": "After subprocess.run", "data": {"returncode": result.returncode, "stdout_len": len(result.stdout) if result.stdout else 0, "stderr": result.stderr.decode("utf-8", errors="replace") if result.stderr else None}, "timestamp": int(time.time() * 1000)}) + "\n")
-            # #endregion
-            if result.returncode == 0:
-                # #region agent log
-                # Check if bytes look like PNG (starts with PNG signature)
-                is_png = result.stdout[:8] == b'\x89PNG\r\n\x1a\n' if len(result.stdout) >= 8 else False
-                first_bytes_hex = result.stdout[:16].hex() if len(result.stdout) >= 16 else result.stdout.hex()
-                with open(log_path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps({"sessionId": "debug-session", "runId": "post-fix", "hypothesisId": "F", "location": "adb_manager.py:340", "message": "Screenshot success", "data": {"bytes_length": len(result.stdout), "is_png": is_png, "first_bytes_hex": first_bytes_hex}, "timestamp": int(time.time() * 1000)}) + "\n")
-                # #endregion
-                return result.stdout
+            display_check_cmd = [self.adb_path, "-s", f"127.0.0.1:{port}", "shell", "dumpsys", "SurfaceFlinger", "--display-id"]
+            display_result = subprocess.run(display_check_cmd, capture_output=True, timeout=5, text=True)
+            if display_result.returncode == 0 and display_result.stdout:
+                # Try to extract display ID (usually 0 for main display)
+                import re
+                display_ids = re.findall(r'Display\s+(\d+)', display_result.stdout)
+                if display_ids:
+                    display_id = display_ids[0]
+        except Exception:
+            pass  # Continue without display ID
+        
+        # Method 1: Use shell screencap to device, then pull (avoids text conversion issues)
+        # This method writes directly to a file on the device and pulls it, avoiding
+        # any carriage return corruption that can happen with exec-out on Windows
+        import tempfile
+        tmp_path = os.path.join(tempfile.gettempdir(), f"screenshot_{vm_index}_{int(time.time())}.png")
+        device_path = "/sdcard/screenshot.png"
+        
+        result = None
+        try:
+            # Step 1: Take screenshot to device storage
+            # ADB screencap syntax: screencap [-p] [-d display-id] <filename>
+            screencap_cmd = [self.adb_path, "-s", f"127.0.0.1:{port}", "shell", "screencap", "-p"]
+            if display_id:
+                screencap_cmd = [self.adb_path, "-s", f"127.0.0.1:{port}", "shell", "screencap", "-p", "-d", display_id]
+            screencap_cmd.append(device_path)
+            
+            screencap_result = subprocess.run(screencap_cmd, capture_output=True, timeout=10)
+            
+            if screencap_result.returncode == 0:
+                # Step 2: Pull the file from device
+                pull_cmd = [self.adb_path, "-s", f"127.0.0.1:{port}", "pull", device_path, tmp_path]
+                pull_result = subprocess.run(pull_cmd, capture_output=True, timeout=10)
+                
+                if pull_result.returncode == 0 and os.path.exists(tmp_path):
+                    # Step 3: Read the file
+                    with open(tmp_path, "rb") as f:
+                        screenshot_data = f.read()
+                    # Clean up
+                    try:
+                        os.unlink(tmp_path)
+                    except:
+                        pass
+                    # Clean up device file
+                    try:
+                        subprocess.run([self.adb_path, "-s", f"127.0.0.1:{port}", "shell", "rm", device_path], 
+                                     capture_output=True, timeout=5)
+                    except:
+                        pass
+                    
+                    result = type('obj', (object,), {'returncode': 0, 'stdout': screenshot_data})()
+                else:
+                    # Fallback to exec-out method
+                    cmd = [self.adb_path, "-s", f"127.0.0.1:{port}", "exec-out", "screencap", "-p"]
+                    if display_id:
+                        cmd = [self.adb_path, "-s", f"127.0.0.1:{port}", "exec-out", "screencap", "-d", display_id, "-p"]
+                    result = subprocess.run(cmd, capture_output=True, timeout=10)
+                    # DO NOT process carriage returns - PNG is binary, modifying it corrupts the file
             else:
-                # #region agent log
-                with open(log_path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps({"sessionId": "debug-session", "runId": "post-fix", "hypothesisId": "E", "location": "adb_manager.py:344", "message": "Screenshot failed - non-zero returncode", "data": {"returncode": result.returncode, "stderr": result.stderr.decode("utf-8", errors="replace") if result.stderr else None}, "timestamp": int(time.time() * 1000)}) + "\n")
-                # #endregion
-                print(f"Screenshot failed: {result.stderr}")
-                return None
-        except FileNotFoundError as e:
-            # #region agent log
-            with open(log_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps({"sessionId": "debug-session", "runId": "post-fix", "hypothesisId": "A", "location": "adb_manager.py:350", "message": "FileNotFoundError exception", "data": {"error_type": type(e).__name__, "error_msg": str(e), "adb_path": self.adb_path}, "timestamp": int(time.time() * 1000)}) + "\n")
-            # #endregion
-            error_msg = (
-                f"Error taking screenshot on VM {vm_index}: ADB executable not found.\n"
-                f"  Attempted path: {self.adb_path}\n"
-                f"  Please ensure ADB is installed and either:\n"
-                f"  1. Add ADB to your system PATH, or\n"
-                f"  2. Configure adb_path in MemuConfig, or\n"
-                f"  3. Install ADB in a standard location (MEmu directory or Android SDK)"
-            )
-            print(error_msg)
-            return None
+                # Fallback to exec-out method
+                cmd = [self.adb_path, "-s", f"127.0.0.1:{port}", "exec-out", "screencap", "-p"]
+                if display_id:
+                    cmd = [self.adb_path, "-s", f"127.0.0.1:{port}", "exec-out", "screencap", "-d", display_id, "-p"]
+                result = subprocess.run(cmd, capture_output=True, timeout=10)
+                # DO NOT process carriage returns - PNG is binary, modifying it corrupts the file
         except Exception as e:
-            # #region agent log
-            with open(log_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps({"sessionId": "debug-session", "runId": "post-fix", "hypothesisId": "E", "location": "adb_manager.py:356", "message": "General exception", "data": {"error_type": type(e).__name__, "error_msg": str(e), "error_args": e.args if hasattr(e, "args") else None}, "timestamp": int(time.time() * 1000)}) + "\n")
-            # #endregion
-            print(f"Error taking screenshot on VM {vm_index}: {e}")
+            print(f"Error taking screenshot: {e}")
+            return None
+        
+        # Check result and return
+        if result and result.returncode == 0:
+            return result.stdout
+        else:
+            if result:
+                print(f"Screenshot failed: {result.stderr}")
             return None
 
-    def get_screen_size(self, vm_index: int, base_port: int = 21503) -> Optional[Tuple[int, int]]:
+    def get_screen_size(self, vm_index: int, base_port: int = 5555) -> Optional[Tuple[int, int]]:
         """
-        Get the screen size (width, height) of the VM.
+        Get the screen size (width, height) of the BlueStacks instance.
 
         Parameters
         ----------
         vm_index : int
-            Index of the virtual machine.
+            Index of the BlueStacks instance.
         base_port : int, optional
-            Base port number. Default is 21503.
+            Base port number. Default is 5555.
 
         Returns
         -------

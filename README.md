@@ -1,14 +1,14 @@
-# MEmu Emulator Controller
+# BlueStacks Emulator Controller
 
-A modular Python package for controlling MEmu emulators using `pymemuc`. This package provides a high-level, object-oriented interface for managing MEmu virtual machines and performing ADB operations.
+A modular Python package for controlling BlueStacks emulators via ADB. This package provides a high-level, object-oriented interface for managing BlueStacks instances and performing ADB operations.
 
 ## Features
 
-- **Modular Architecture**: Separated into distinct modules for VM management, ADB operations, and configuration
+- **Modular Architecture**: Separated into distinct modules for instance detection, ADB operations, and configuration
 - **Easy to Use**: High-level controller class that combines all functionality
-- **Flexible Configuration**: Customizable settings for VM creation, ADB ports, and timeouts
-- **Comprehensive Operations**: Create, start, stop, delete VMs; execute ADB commands; install APKs
-- **Status Monitoring**: Check VM status, running state, and ADB connectivity
+- **Flexible Configuration**: Customizable settings for ADB ports and timeouts
+- **Comprehensive Operations**: Detect running instances; execute ADB commands; install APKs
+- **Status Monitoring**: Check instance status, running state, and ADB connectivity
 - **Screenshot Capture**: Take screenshots of the emulator screen for analysis
 - **Gesture Control**: Full gesture support (tap, swipe, long press, drag, pinch zoom)
 - **Image Processing**: Template matching, color detection, and image analysis utilities
@@ -17,7 +17,7 @@ A modular Python package for controlling MEmu emulators using `pymemuc`. This pa
 ## Prerequisites
 
 - Python 3.7 or higher
-- MEmu Play installed on your system
+- BlueStacks installed on your system
 - ADB (Android Debug Bridge) - **Included in this repository** in the `platform-tools/` folder, or can be installed separately
 
 ## Installation
@@ -58,9 +58,9 @@ If you prefer to use a system-wide ADB installation:
 - Make sure ADB is in your system PATH, or
 - Configure the ADB path manually (see Configuration section below)
 
-### 3. Verify MEmu Installation
+### 3. Verify BlueStacks Installation
 
-Make sure MEmu Play is installed and `memuc.exe` is accessible. The `pymemuc` library will attempt to auto-detect the MEmu installation path.
+Make sure BlueStacks is installed and running. BlueStacks instances must be created and started manually through the BlueStacks application. The package will detect running instances via ADB.
 
 ## Project Structure
 
@@ -96,17 +96,19 @@ memu_emulator/
 ### Basic Usage
 
 ```python
-from memu_controller import MemuController
+from memu_controller import BlueStacksController
 
 # Create controller
-controller = MemuController()
+controller = BlueStacksController()
 
-# List existing VMs
-vms = controller.list_vms()
-print(f"Found {len(vms)} VMs")
+# List existing BlueStacks instances (detected via ADB)
+instances = controller.list_vms()
+print(f"Found {len(instances)} BlueStacks instances")
 
-# Create and start a new VM
-vm_index = controller.create_and_start_vm(vm_name="My_VM")
+# Connect to an instance (assuming instance 0 is running)
+vm_index = 0
+if not controller.get_vm_status(vm_index)['adb_connected']:
+    controller.connect_adb(vm_index)
 
 # Execute ADB commands
 android_version = controller.execute_adb_command(
@@ -115,25 +117,23 @@ android_version = controller.execute_adb_command(
 )
 print(f"Android Version: {android_version}")
 
-# Stop the VM
-controller.stop_vm(vm_index)
+# Disconnect ADB
+controller.disconnect_adb(vm_index)
 ```
 
 ### Custom Configuration
 
 ```python
-from memu_controller import MemuController, MemuConfig
+from memu_controller import BlueStacksController, BlueStacksConfig
 
 # Create custom configuration
-config = MemuConfig(
-    default_vm_name="Custom_VM",
-    auto_start=True,
+config = BlueStacksConfig(
     timeout=90,
-    adb_port_base=21503
+    adb_port_base=5555  # BlueStacks default port
 )
 
 # Create controller with custom config
-controller = MemuController(config=config)
+controller = BlueStacksController(config=config)
 ```
 
 ## Usage Examples
@@ -165,24 +165,24 @@ python examples/interactive_control.py
 
 ## API Reference
 
-### MemuController
+### BlueStacksController
 
 Main controller class that provides unified interface for all operations.
 
 #### Methods
 
-- `list_vms()` - List all available VMs
-- `create_and_start_vm(vm_name=None)` - Create and start a new VM
-- `start_vm(vm_index, connect_adb=True)` - Start an existing VM
-- `stop_vm(vm_index, disconnect_adb=True)` - Stop a running VM
-- `delete_vm(vm_index, force_stop=True)` - Delete a VM
-- `get_vm_status(vm_index)` - Get comprehensive VM status
-- `connect_adb(vm_index)` - Connect to VM via ADB
-- `disconnect_adb(vm_index)` - Disconnect from VM via ADB
+- `list_vms()` - List all available BlueStacks instances (detected via ADB)
+- `create_and_start_vm(vm_name=None)` - Note: BlueStacks instances must be created manually
+- `start_vm(vm_index, connect_adb=True)` - Check if instance is running and connect ADB
+- `stop_vm(vm_index, disconnect_adb=True)` - Disconnect ADB (instances must be stopped manually)
+- `delete_vm(vm_index, force_stop=True)` - Note: BlueStacks instances must be deleted manually
+- `get_vm_status(vm_index)` - Get comprehensive instance status
+- `connect_adb(vm_index)` - Connect to instance via ADB
+- `disconnect_adb(vm_index)` - Disconnect from instance via ADB
 - `execute_adb_command(vm_index, command)` - Execute ADB shell command
-- `install_apk(vm_index, apk_path)` - Install APK on VM
-- `set_active_vm(vm_index)` - Set active VM for operations
-- `get_active_vm()` - Get currently active VM index
+- `install_apk(vm_index, apk_path)` - Install APK on instance
+- `set_active_vm(vm_index)` - Set active instance for operations
+- `get_active_vm()` - Get currently active instance index
 - `take_screenshot(vm_index, save_path=None)` - Take screenshot and save to file
 - `take_screenshot_image(vm_index)` - Take screenshot as PIL Image
 - `get_screen_size(vm_index)` - Get screen dimensions (width, height)
@@ -195,36 +195,33 @@ Main controller class that provides unified interface for all operations.
 - `find_template_in_screenshot(vm_index, template_path, threshold=0.8)` - Find template in screenshot
 - `tap_template(vm_index, template_path, threshold=0.8)` - Find and tap template
 
-### MemuConfig
+### BlueStacksConfig
 
 Configuration class for customizing controller behavior.
 
 #### Attributes
 
-- `memuc_path` - Path to memuc.exe (None for auto-detect)
 - `adb_path` - Path to adb.exe (None for auto-detect, checks local `platform-tools/` folder first)
-- `default_vm_name` - Default name for created VMs
-- `auto_start` - Automatically start VMs after creation
 - `timeout` - Default timeout for operations (seconds)
-- `adb_port_base` - Base port for ADB connections
+- `adb_port_base` - Base port for ADB connections (default: 5555 for BlueStacks)
 
 #### ADB Auto-Detection
 
 The package automatically detects ADB in the following order:
 1. **Local `platform-tools/` folder** (included in repository) - **Highest priority**
 2. System PATH
-3. MEmu installation directory
+3. BlueStacks installation directory
 4. Android SDK platform-tools directory
 
 You can also manually specify the ADB path:
 
 ```python
-from memu_controller import MemuController, MemuConfig
+from memu_controller import BlueStacksController, BlueStacksConfig
 
-config = MemuConfig(
+config = BlueStacksConfig(
     adb_path="C:/path/to/adb.exe"  # Custom ADB path
 )
-controller = MemuController(config=config)
+controller = BlueStacksController(config=config)
 ```
 
 ### VMManager
@@ -353,26 +350,29 @@ controller.execute_adb_command(
 
 ## Troubleshooting
 
-### VM Creation Fails
+### BlueStacks Instance Not Detected
 
-- Ensure MEmu Play is installed correctly
-- Check that `memuc.exe` is accessible
-- Verify you have sufficient disk space
+- Ensure BlueStacks is installed and running
+- Make sure the BlueStacks instance is fully booted before connecting
+- Verify ADB can see the instance: `adb devices`
+- Try manually connecting: `adb connect 127.0.0.1:5555`
 
 ### ADB Connection Fails
 
-- Ensure the VM is fully booted before connecting
+- Ensure the BlueStacks instance is fully booted before connecting
 - **ADB is included in the repository** - the package will auto-detect it from `platform-tools/` folder
 - If using system ADB, check that ADB is installed and in PATH
-- Verify the ADB port (default: 21503 + VM index)
-- Try manually connecting: `adb connect 127.0.0.1:21503`
+- Verify the ADB port (default: 5555 for first instance)
+- Try manually connecting: `adb connect 127.0.0.1:5555`
 - Check that the `platform-tools/adb.exe` file exists in the project root
+- Enable ADB in BlueStacks settings if needed
 
-### VM Not Starting
+### Instance Not Starting
 
-- Check MEmu Play is running
+- BlueStacks instances must be started manually through the BlueStacks application
+- Check BlueStacks is running
 - Verify system resources (RAM, CPU)
-- Check MEmu logs for errors
+- Check BlueStacks logs for errors
 
 ## Contributing
 
@@ -389,6 +389,6 @@ This project is provided as-is for controlling MEmu emulators programmatically.
 
 ## Acknowledgments
 
-- Built on top of [pymemuc](https://github.com/pyclashbot/pymemuc)
-- Designed for use with MEmu Play emulator
+- Designed for use with BlueStacks emulator
+- Uses ADB (Android Debug Bridge) for communication
 

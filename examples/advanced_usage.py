@@ -1,8 +1,8 @@
 """
-Advanced usage example for MEmu controller.
+Advanced usage example for BlueStacks controller.
 
 This example demonstrates advanced operations including custom configuration,
-multiple VM management, and APK installation.
+multiple instance management, and APK installation.
 """
 
 import sys
@@ -13,41 +13,45 @@ project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from memu_controller import MemuController, MemuConfig
+from memu_controller import BlueStacksController, BlueStacksConfig
 import time
 
 
 def main():
-    """Demonstrate advanced MEmu controller usage."""
+    """Demonstrate advanced BlueStacks controller usage."""
     # Create custom configuration
-    config = MemuConfig(
-        default_vm_name="Advanced_Test_VM",
-        auto_start=True,
+    config = BlueStacksConfig(
         timeout=90,
-        adb_port_base=21503
+        adb_port_base=5555
     )
     
-    controller = MemuController(config=config)
+    controller = BlueStacksController(config=config)
     
-    # List all VMs and their status
-    print("=== VM Status Overview ===")
-    vms = controller.list_vms()
-    for vm in vms:
-        vm_index = vm.get('index')
+    # List all BlueStacks instances and their status
+    print("=== BlueStacks Instance Status Overview ===")
+    instances = controller.list_vms()
+    if not instances:
+        print("No BlueStacks instances detected. Please start BlueStacks first.")
+        return
+    
+    for instance in instances:
+        vm_index = instance.get('index')
         status = controller.get_vm_status(vm_index)
-        print(f"\nVM {vm_index} ({vm.get('name', 'Unknown')}):")
+        print(f"\nInstance {vm_index} ({instance.get('name', 'Unknown')}):")
         print(f"  Running: {status['running']}")
         print(f"  ADB Connected: {status['adb_connected']}")
     
-    # Create a new VM with custom name
-    print("\n=== Creating New VM ===")
-    vm_index = controller.create_and_start_vm(vm_name="My_Custom_VM")
+    # Note: BlueStacks instances must be created manually
+    print("\n=== Note: BlueStacks instances must be created manually ===")
+    print("Please create and start instances through the BlueStacks application.")
     
-    if vm_index is None:
-        print("Failed to create VM")
+    # Use first available instance
+    if instances:
+        vm_index = instances[0].get('index')
+        print(f"\nUsing instance {vm_index}")
+    else:
+        print("No instances available")
         return
-    
-    print(f"VM created with index: {vm_index}")
     
     # Set as active VM
     controller.set_active_vm(vm_index)
@@ -106,19 +110,14 @@ def main():
     # )
     # print(f"Launch result: {result}")
     
-    # Cleanup: Stop and optionally delete VM
+    # Cleanup: Disconnect ADB
     print("\n=== Cleanup ===")
-    response = input("Do you want to stop the VM? (y/n): ")
+    response = input("Do you want to disconnect ADB? (y/n): ")
     if response.lower() == 'y':
-        controller.stop_vm(vm_index)
-        print("VM stopped")
-        
-        response = input("Do you want to delete the VM? (y/n): ")
-        if response.lower() == 'y':
-            controller.delete_vm(vm_index)
-            print("VM deleted")
+        controller.disconnect_adb(vm_index)
+        print("ADB disconnected")
     else:
-        print("VM left running")
+        print("ADB left connected")
 
 
 if __name__ == "__main__":

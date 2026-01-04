@@ -1,11 +1,11 @@
 # Quick Start Guide: Game Automation
 
-This guide will help you get started with automating games in MEmu emulator using screenshot analysis and gesture control.
+This guide will help you get started with automating games in BlueStacks emulator using screenshot analysis and gesture control.
 
 ## Prerequisites
 
-1. MEmu Play installed and running
-2. At least one VM created in MEmu
+1. BlueStacks installed and running
+2. At least one BlueStacks instance created and running
 3. Python virtual environment set up (see main README)
 
 ## Installation
@@ -25,21 +25,21 @@ pip install -r requirements.txt
 ### 1. Connect to Your VM
 
 ```python
-from memu_controller import MemuController
+from memu_controller import BlueStacksController
 
-controller = MemuController()
+controller = BlueStacksController()
 
-# List VMs and select one
-vms = controller.list_vms()
-vm_index = vms[0].get('index')  # Use first VM
+# List BlueStacks instances and select one
+instances = controller.list_vms()
+if not instances:
+    print("No BlueStacks instances detected. Please start BlueStacks first.")
+    exit(1)
+vm_index = instances[0].get('index')  # Use first instance
 
-# Start VM if not running
-if not controller.get_vm_status(vm_index)['running']:
-    controller.start_vm(vm_index)
-    time.sleep(10)  # Wait for boot
-
-# Connect ADB
-controller.connect_adb(vm_index)
+# Connect ADB if not connected
+if not controller.get_vm_status(vm_index)['adb_connected']:
+    controller.connect_adb(vm_index)
+    time.sleep(2)  # Wait for connection
 ```
 
 ### 2. Take Screenshots
@@ -122,9 +122,9 @@ project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from memu_controller import MemuController, ImageProcessor
+from memu_controller import BlueStacksController, ImageProcessor
 
-def game_bot(controller: MemuController, vm_index: int):
+def game_bot(controller: BlueStacksController, vm_index: int):
     """Simple game automation bot."""
     
     # Get screen size
@@ -161,22 +161,21 @@ def game_bot(controller: MemuController, vm_index: int):
         time.sleep(3)
 
 if __name__ == "__main__":
-    controller = MemuController()
+    controller = BlueStacksController()
     
-    # Get VM
-    vms = controller.list_vms()
-    if not vms:
-        print("No VMs found")
+    # Get BlueStacks instance
+    instances = controller.list_vms()
+    if not instances:
+        print("No BlueStacks instances found. Please start BlueStacks first.")
         exit(1)
     
-    vm_index = vms[0].get('index')
+    vm_index = instances[0].get('index')
     
-    # Ensure VM is running
+    # Ensure instance is running and ADB is connected
     status = controller.get_vm_status(vm_index)
     if not status['running']:
-        print("Starting VM...")
-        controller.start_vm(vm_index)
-        time.sleep(10)
+        print("BlueStacks instance is not running. Please start it manually.")
+        exit(1)
     
     if not status['adb_connected']:
         print("Connecting ADB...")
