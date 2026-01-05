@@ -2,7 +2,7 @@
 Crowns game automation script.
 
 This script automates playing the Crowns puzzle game by:
-1. Finding and tapping "Crowns" text to open the game
+1. Assuming the user is already in the Crowns game screen
 2. Analyzing the game board from screenshots
 3. Solving the puzzle using constraint satisfaction
 4. Automatically placing crowns by tapping on correct cells
@@ -211,6 +211,9 @@ def solve_and_place_crowns(
 def main():
     """
     Main automation function.
+    
+    Assumes the user is already in the Crowns game screen.
+    Immediately takes a screenshot and solves the puzzle.
     """
     # Initialize controller
     controller = BlueStacksController()
@@ -232,14 +235,6 @@ def main():
         if not controller.connect_adb(vm_index):
             print("Error: Failed to establish ADB connection after status check.")
             return 1
-
-    # Find and open the game
-    if not find_and_open_crowns_game(controller, vm_index):
-        print("Error: Could not open Crowns game.")
-        return 1
-
-    # Minimal wait - game loads instantly, screenshot will verify it's ready
-    time.sleep(0.1)
 
     # Initialize analyzer (debug disabled for performance)
     analyzer = CrownsBoardAnalyzer(debug=False)
