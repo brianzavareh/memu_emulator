@@ -469,32 +469,46 @@ class CrownsBoardAnalyzer:
             spacing_variance_h = np.std(horizontal_spacings) / avg_h_spacing if len(horizontal_spacings) > 0 else 1.0
             spacing_variance_v = np.std(vertical_spacings) / avg_v_spacing if len(vertical_spacings) > 0 else 1.0
             
+            # Grid is always n×n square, so calculate size once and use for both dimensions
             # If variance is low (< 0.3), spacing is uniform, so L lines = L-1 cells
             # If variance is high, we might have missed lines - try L lines = L cells
+            
+            # Calculate estimates for both dimensions
             if spacing_variance_h < 0.3:
-                estimated_rows = len(horizontal_lines_sorted) - 1
+                estimated_rows_from_h = len(horizontal_lines_sorted) - 1
             else:
                 # Spacing varies - might have missed some lines
                 # Estimate from grid height and average spacing
-                estimated_rows = int(round(grid_height / avg_h_spacing))
+                estimated_rows_from_h = int(round(grid_height / avg_h_spacing))
             
             if spacing_variance_v < 0.3:
-                estimated_cols = len(vertical_lines_sorted) - 1
+                estimated_cols_from_v = len(vertical_lines_sorted) - 1
             else:
-                # Spacing varies - might have missed some lines
+                # Spacing varies - might have missed lines
                 # Estimate from grid width and average spacing
-                estimated_cols = int(round(grid_width / avg_v_spacing))
+                estimated_cols_from_v = int(round(grid_width / avg_v_spacing))
+            
+            # Since grid is always square, use the average or the more reliable estimate
+            # Prefer the one with lower variance (more reliable)
+            if spacing_variance_h <= spacing_variance_v:
+                # Horizontal detection is more reliable
+                estimated_size = estimated_rows_from_h
+            else:
+                # Vertical detection is more reliable
+                estimated_size = estimated_cols_from_v
+            
+            # Ensure both dimensions are the same (square grid)
+            estimated_rows = estimated_size
+            estimated_cols = estimated_size
             
             if self.debug:
-                print(f"Debug: Estimated grid size: {estimated_rows}x{estimated_cols}")
+                print(f"Debug: Estimated grid size (square): {estimated_rows}x{estimated_cols}")
                 print(f"Debug: Spacing variance - H: {spacing_variance_h:.3f}, V: {spacing_variance_v:.3f}")
+                print(f"Debug: Raw estimates - rows: {estimated_rows_from_h}, cols: {estimated_cols_from_v}")
             
             # Validate grid size
-            if estimated_rows < min_grid_size or estimated_rows > max_grid_size:
-                print(f"Error: Detected {estimated_rows} rows, which is outside valid range [{min_grid_size}, {max_grid_size}]")
-                return None
-            if estimated_cols < min_grid_size or estimated_cols > max_grid_size:
-                print(f"Error: Detected {estimated_cols} cols, which is outside valid range [{min_grid_size}, {max_grid_size}]")
+            if estimated_size < min_grid_size or estimated_size > max_grid_size:
+                print(f"Error: Detected {estimated_size}x{estimated_size} grid, which is outside valid range [{min_grid_size}, {max_grid_size}]")
                 return None
             
             # Use detected lines to calculate cell positions directly
