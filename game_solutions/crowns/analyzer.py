@@ -1088,4 +1088,3 @@ class CrownsBoardAnalyzer:
             coords_2d.append(row_coords)
 
         return coords_2d
-
