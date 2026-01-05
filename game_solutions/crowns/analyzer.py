@@ -30,6 +30,276 @@ class CrownsBoardAnalyzer:
         """
         self.debug = debug
 
+    def _detect_grid_lines(
+        self,
+        grid_region: np.ndarray,
+        is_horizontal: bool = True
+    ) -> List[int]:
+        """
+        Detect grid lines using OpenCV-recommended morphological operations method.
+        
+        This method uses MORPH_OPEN to extract horizontal/vertical lines separately,
+        which works robustly even with varying line thickness (thick region borders
+        and thin internal grid lines).
+        
+        Based on OpenCV tutorial: Morphological Line Detection
+        https://docs.opencv.org/master/dd/dd7/tutorial_morph_lines_detection.html
+        
+        Parameters
+        ----------
+        grid_region : np.ndarray
+            Grayscale image of the grid region.
+        is_horizontal : bool, optional
+            If True, detect horizontal lines (project along rows).
+            If False, detect vertical lines (project along columns).
+            Default is True.
+        
+        Returns
+        -------
+        List[int]
+            List of line positions (row indices for horizontal, col indices for vertical).
+        """
+        # Step 1: Apply adaptive thresholding (handles varying lighting)
+        # This is better than Otsu for grids with varying backgrounds
+        binary = cv2.adaptiveThreshold(
+            grid_region,
+            255,
+            cv2.ADAPTIVE_THRESH_MEAN_C,
+            cv2.THRESH_BINARY_INV,  # Invert so dark lines become white
+            15,  # Block size - should be odd, adjust based on cell size
+            2    # C constant subtracted from mean
+        )
+        
+        # Step 2: Define structuring elements for morphological operations
+        # The key is to use LONG kernels in the direction we want to extract
+        # For horizontal lines: kernel is wide (many pixels) but only 1 pixel tall
+        # For vertical lines: kernel is tall (many pixels) but only 1 pixel wide
+        # This extracts lines regardless of their thickness!
+        
+        # Calculate kernel length based on grid size
+        # Should be long enough to span multiple cells but not too long
+        if is_horizontal:
+            # Horizontal kernel: wide enough to span most of the grid width
+            kernel_length = int(grid_region.shape[1] * 0.6)  # 60% of width
+            kernel_length = max(25, kernel_length)  # At least 25 pixels
+            horizontal_kernel = cv2.getStructuringElement(
+                cv2.MORPH_RECT, 
+                (kernel_length, 1)  # Wide but only 1 pixel tall
+            )
+            
+            # Use MORPH_OPEN to extract horizontal lines
+            # MORPH_OPEN = erosion followed by dilation
+            # This removes small objects and isolates horizontal lines
+            detected_lines = cv2.morphologyEx(
+                binary,
+                cv2.MORPH_OPEN,
+                horizontal_kernel,
+                iterations=2  # Apply multiple times for better extraction
+            )
+        else:
+            # Vertical kernel: tall enough to span most of the grid height
+            kernel_length = int(grid_region.shape[0] * 0.6)  # 60% of height
+            kernel_length = max(25, kernel_length)  # At least 25 pixels
+            vertical_kernel = cv2.getStructuringElement(
+                cv2.MORPH_RECT,
+                (1, kernel_length)  # Tall but only 1 pixel wide
+            )
+            
+            # Use MORPH_OPEN to extract vertical lines
+            detected_lines = cv2.morphologyEx(
+                binary,
+                cv2.MORPH_OPEN,
+                vertical_kernel,
+                iterations=2  # Apply multiple times for better extraction
+            )
+        
+        # Step 3: Project along the appropriate axis to find line positions
+        # Sum along columns for horizontal lines, along rows for vertical lines
+        if is_horizontal:
+            projection = np.sum(detected_lines, axis=1)
+        else:
+            projection = np.sum(detected_lines, axis=0)
+        
+        # Step 4: Normalize projection to 0-1 range
+        projection = projection.astype(np.float32)
+        if projection.max() > 0:
+            projection = projection / projection.max()
+        
+        # Step 5: Find peaks in the projection
+        # Lines will show up as peaks in the projection
+        # Note: We'll calculate threshold AFTER smoothing, as smoothing affects peak values
+        
+        
+        # Estimate expected cell size for peak detection window
+        # Try to detect grid size first by looking at spacing
+        if is_horizontal:
+            grid_dimension = grid_region.shape[0]
+        else:
+            grid_dimension = grid_region.shape[1]
+        
+        # Estimate cell size (assume grid is between 3x3 and 15x15)
+        # Use average of possible cell sizes
+        possible_sizes = list(range(3, 16))
+        estimated_cell_size = int(np.mean([grid_dimension / size for size in possible_sizes]))
+        
+        # Window size for peak detection should be smaller than cell size
+        window_size = max(3, estimated_cell_size // 4)
+        
+        # Smooth the projection to reduce noise
+        smooth_kernel_size = max(3, window_size)
+        if smooth_kernel_size % 2 == 0:
+            smooth_kernel_size += 1  # Make it odd
+        smooth_kernel = np.ones(smooth_kernel_size) / smooth_kernel_size
+        projection_smooth = np.convolve(projection, smooth_kernel, mode='same')
+        
+        # Calculate threshold based on SMOOTHED projection statistics
+        # This is critical because smoothing reduces peak values
+        mean_proj_smooth = np.mean(projection_smooth)
+        std_proj_smooth = np.std(projection_smooth)
+        
+        # Use a lower multiplier for smoothed projection (smoothing reduces variance)
+        # Also ensure threshold is not too high - use 1.0 * std instead of 1.5
+        threshold = mean_proj_smooth + 1.0 * std_proj_smooth
+        
+        # Fallback: if threshold is still too high, use percentile-based threshold
+        # Ensure at least some peaks can be detected
+        percentile_95 = np.percentile(projection_smooth, 95)
+        if threshold > percentile_95:
+            threshold = percentile_95 * 0.9  # Use 90% of 95th percentile
+        
+        # Find local maxima (peaks) that exceed threshold
+        line_positions = []
+        
+        for i in range(window_size, len(projection_smooth) - window_size):
+            center_val = projection_smooth[i]
+            
+            # Must exceed threshold
+            if center_val < threshold:
+                continue
+            
+            # Check if it's a local maximum
+            is_maximum = True
+            for j in range(i - window_size, i + window_size + 1):
+                if j != i and projection_smooth[j] > center_val:
+                    is_maximum = False
+                    break
+            
+            if is_maximum:
+                # Verify with original (unsmoothed) projection
+                if projection[i] >= threshold * 0.8:  # Allow some tolerance
+                    line_positions.append(i)
+        
+        # Step 6: Filter out lines that are too close together
+        # Minimum spacing should be at least 1/4 of estimated cell size
+        min_spacing = max(3, estimated_cell_size // 4)
+        filtered_positions = self._filter_close_values(line_positions, threshold=min_spacing)
+        
+        return filtered_positions
+    
+    def _detect_grid_lines_hough(
+        self,
+        grid_region: np.ndarray,
+        is_horizontal: bool = True
+    ) -> List[int]:
+        """
+        Fallback method: Detect lines using Hough Line Transform.
+        
+        Parameters
+        ----------
+        grid_region : np.ndarray
+            Grayscale image of the grid region.
+        is_horizontal : bool, optional
+            If True, detect horizontal lines.
+            If False, detect vertical lines.
+            Default is True.
+        
+        Returns
+        -------
+        List[int]
+            List of line positions.
+        """
+        # Preprocess
+        blurred = cv2.GaussianBlur(grid_region, (5, 5), 0)
+        
+        # Edge detection
+        median_val = np.median(blurred)
+        lower_threshold = int(max(0, 0.7 * median_val))
+        upper_threshold = int(min(255, 1.3 * median_val))
+        edges = cv2.Canny(blurred, lower_threshold, upper_threshold)
+        
+        # Morphological operations
+        if is_horizontal:
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (grid_region.shape[1] // 2, 1))
+        else:
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, grid_region.shape[0] // 2))
+        edges = cv2.dilate(edges, kernel, iterations=1)
+        
+        # Hough Line Transform
+        if is_horizontal:
+            min_line_length = int(grid_region.shape[1] * 0.7)
+        else:
+            min_line_length = int(grid_region.shape[0] * 0.7)
+        
+        lines = cv2.HoughLinesP(
+            edges,
+            rho=1,
+            theta=np.pi / 180,
+            threshold=50,
+            minLineLength=min_line_length,
+            maxLineGap=20
+        )
+        
+        if lines is None or len(lines) == 0:
+            return []
+        
+        # Extract positions
+        line_positions = []
+        angle_tolerance = 5 * np.pi / 180
+        target_angle = 0.0 if is_horizontal else np.pi / 2
+        
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+            
+            if x2 == x1:
+                angle = np.pi / 2
+            else:
+                angle = np.arctan2(y2 - y1, x2 - x1)
+            
+            if angle < 0:
+                angle += np.pi
+            
+            angle_diff = abs(angle - target_angle)
+            if angle_diff > np.pi / 2:
+                angle_diff = np.pi - angle_diff
+            
+            if angle_diff <= angle_tolerance:
+                if is_horizontal:
+                    pos = int((y1 + y2) / 2)
+                else:
+                    pos = int((x1 + x2) / 2)
+                line_positions.append(pos)
+        
+        # Cluster nearby lines
+        if not line_positions:
+            return []
+        
+        line_positions = sorted(line_positions)
+        clustered = []
+        current_cluster = [line_positions[0]]
+        
+        for pos in line_positions[1:]:
+            if pos - current_cluster[-1] <= 5:
+                current_cluster.append(pos)
+            else:
+                clustered.append(int(np.mean(current_cluster)))
+                current_cluster = [pos]
+        
+        if current_cluster:
+            clustered.append(int(np.mean(current_cluster)))
+        
+        min_spacing = max(5, (grid_region.shape[0] if is_horizontal else grid_region.shape[1]) // 20)
+        return self._filter_close_values(clustered, threshold=min_spacing)
+
     def detect_grid(
         self,
         screenshot: Image.Image,
@@ -39,11 +309,11 @@ class CrownsBoardAnalyzer:
         """
         Detect grid boundaries and cell positions from a screenshot.
         
-        New approach:
-        1. Detect the grid as a large square/rectangle
-        2. Count distinct color regions inside (excluding black grid lines)
-        3. Determine grid size from region count
-        4. Calculate cell positions
+        Approach:
+        1. Detect the grid as a large square/rectangle (fixed bounds)
+        2. Extract the grid region and detect dark gray vertical/horizontal lines
+        3. Count lines to determine actual grid size
+        4. Calculate cell positions based on detected grid size
 
         Parameters
         ----------
@@ -72,7 +342,7 @@ class CrownsBoardAnalyzer:
             gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
             
             # Step 1: Use exact grid coordinates from user feedback
-            # Grid is at (16, 166) to (884, 1035) - a 9x9 square grid
+            # Grid is at (16, 166) to (884, 1035) - a square grid
             img_height, img_width = img_cv.shape[:2]
             
             # Use the exact coordinates provided by user
@@ -91,111 +361,199 @@ class CrownsBoardAnalyzer:
                 grid_width = grid_size
                 grid_height = grid_size
             
-            # Step 2: Extract grid region and count distinct colors (excluding black)
-            grid_region = img_cv[grid_y:grid_y+grid_height, grid_x:grid_x+grid_width]
+            # Step 2: Extract grid region and detect dark gray lines
+            # Ensure coordinates are within image bounds
+            grid_x = max(0, int(grid_x))
+            grid_y = max(0, int(grid_y))
+            grid_width = min(int(grid_width), img_width - grid_x)
+            grid_height = min(int(grid_height), img_height - grid_y)
             
-            # Convert to RGB for color analysis
-            grid_rgb = cv2.cvtColor(grid_region, cv2.COLOR_BGR2RGB)
+            grid_region = gray[grid_y:grid_y + grid_height, grid_x:grid_x + grid_width]
             
-            # Reshape to list of pixels
-            pixels = grid_rgb.reshape(-1, 3)
-            
-            # Filter out black/dark pixels (grid lines)
-            # Grid lines are dark gray/blackish - use a higher threshold to exclude them
-            # Region colors are bright, so we want pixels that are clearly not grid lines
-            black_threshold = 50  # Increased threshold to better exclude dark grid lines
-            non_black_mask = np.any(pixels > black_threshold, axis=1)
-            non_black_pixels = pixels[non_black_mask]
-            
-            if len(non_black_pixels) == 0:
+            if grid_region.size == 0:
+                print("Error: Grid region is empty")
                 return None
             
-            # Cluster colors to find distinct regions
-            # We expect exactly 9 distinct region colors for a 9x9 grid
-            # Use k-means clustering to find the 9 most distinct colors
-            from sklearn.cluster import KMeans
+            # Detect horizontal lines (rows)
+            horizontal_lines = self._detect_grid_lines(grid_region, is_horizontal=True)
+            # Detect vertical lines (columns)
+            vertical_lines = self._detect_grid_lines(grid_region, is_horizontal=False)
             
-            # Try k-means with k=9 to find the 9 region colors
-            target_colors = 9
-            if len(non_black_pixels) < target_colors:
-                # Not enough pixels, use simple quantization
-                quantization_step = 20
-                quantized = (non_black_pixels // quantization_step) * quantization_step
-                quantized_tuples = [tuple(p) for p in quantized]
-                unique_colors = set(quantized_tuples)
-                best_k = len(unique_colors)
+            if self.debug:
+                print(f"Debug: Initially detected {len(horizontal_lines)} horizontal lines, {len(vertical_lines)} vertical lines")
+                print(f"Debug: Horizontal lines: {horizontal_lines[:10] if len(horizontal_lines) > 10 else horizontal_lines}")
+                print(f"Debug: Vertical lines: {vertical_lines[:10] if len(vertical_lines) > 10 else vertical_lines}")
+            
+            # Grid size = number of lines - 1 (lines separate cells)
+            # For a grid with N cells, there are N+1 lines (including borders)
+            # So if we detect L lines, we have L-1 cells
+            # However, we might not detect border lines, so we need to be careful
+            
+            # Filter lines to get the main grid pattern
+            # Use clustering to find the dominant spacing pattern
+            if len(horizontal_lines) >= 2:
+                horizontal_lines = self._cluster_and_filter_lines(
+                    horizontal_lines, min_grid_size, max_grid_size
+                )
+            if len(vertical_lines) >= 2:
+                vertical_lines = self._cluster_and_filter_lines(
+                    vertical_lines, min_grid_size, max_grid_size
+                )
+            
+            if self.debug:
+                print(f"Debug: After filtering: {len(horizontal_lines)} horizontal lines, {len(vertical_lines)} vertical lines")
+            
+            # Check if we have enough lines to detect grid
+            if len(horizontal_lines) < 2 or len(vertical_lines) < 2:
+                print(f"Error: Not enough lines detected. Horizontal: {len(horizontal_lines)}, Vertical: {len(vertical_lines)}")
+                print("Cannot determine grid size without sufficient line detection.")
+                return None
+            
+            # Sort lines to ensure proper order
+            horizontal_lines_sorted = sorted(horizontal_lines)
+            vertical_lines_sorted = sorted(vertical_lines)
+            
+            # Calculate spacing between consecutive lines to determine if borders are missing
+            if len(horizontal_lines_sorted) > 1:
+                horizontal_spacings = [
+                    horizontal_lines_sorted[i+1] - horizontal_lines_sorted[i]
+                    for i in range(len(horizontal_lines_sorted) - 1)
+                ]
+                avg_h_spacing = np.mean(horizontal_spacings)
+                min_h_spacing = np.min(horizontal_spacings)
+                max_h_spacing = np.max(horizontal_spacings)
             else:
-                try:
-                    # Use k-means to find exactly 9 cluster centers
-                    kmeans = KMeans(n_clusters=target_colors, random_state=42, n_init=10, max_iter=300)
-                    kmeans.fit(non_black_pixels)
-                    best_k = target_colors
-                except Exception as e:
-                    # Fallback to quantization if k-means fails
-                    # Use adaptive quantization
-                    quantization_step = 25  # Start with moderate quantization
-                    quantized = (non_black_pixels // quantization_step) * quantization_step
-                    quantized_tuples = [tuple(p) for p in quantized]
-                    unique_colors = set(quantized_tuples)
-                    best_k = len(unique_colors)
-                    
-                    # Adjust to get closer to 9 colors
-                    if best_k < 7:
-                        quantization_step = 15
-                        quantized = (non_black_pixels // quantization_step) * quantization_step
-                        quantized_tuples = [tuple(p) for p in quantized]
-                        unique_colors = set(quantized_tuples)
-                        best_k = len(unique_colors)
-                    elif best_k > 12:
-                        quantization_step = 35
-                        quantized = (non_black_pixels // quantization_step) * quantization_step
-                        quantized_tuples = [tuple(p) for p in quantized]
-                        unique_colors = set(quantized_tuples)
-                        best_k = len(unique_colors)
+                avg_h_spacing = grid_height / 10  # Rough estimate
+                min_h_spacing = avg_h_spacing
+                max_h_spacing = avg_h_spacing
             
-            # Step 3: Determine grid size from region count
-            # For a square grid with N distinct region colors, the grid is typically N x N
-            # User confirmed: 9 distinct colors = 9x9 grid
-            
-            estimated_rows = None
-            estimated_cols = None
-            
-            # If we found exactly 9 colors, it's a 9x9 grid
-            if best_k == 9:
-                estimated_rows = 9
-                estimated_cols = 9
-            # The number of distinct colors typically equals the grid size for square grids
-            elif min_grid_size <= best_k <= max_grid_size:
-                estimated_rows = best_k
-                estimated_cols = best_k
+            if len(vertical_lines_sorted) > 1:
+                vertical_spacings = [
+                    vertical_lines_sorted[i+1] - vertical_lines_sorted[i]
+                    for i in range(len(vertical_lines_sorted) - 1)
+                ]
+                avg_v_spacing = np.mean(vertical_spacings)
+                min_v_spacing = np.min(vertical_spacings)
+                max_v_spacing = np.max(vertical_spacings)
             else:
-                # If outside range, default to 9x9 (most common) or closest valid size
-                if 7 <= best_k <= 11:  # Close to 9
-                    estimated_rows = 9
-                    estimated_cols = 9
+                avg_v_spacing = grid_width / 10  # Rough estimate
+                min_v_spacing = avg_v_spacing
+                max_v_spacing = avg_v_spacing
+            
+            # Check if we're missing border lines at the edges
+            # If first line is far from 0 (more than half average spacing), add border line
+            # If last line is far from grid_size-1 (more than half average spacing), add border line
+            if len(horizontal_lines_sorted) > 0:
+                if horizontal_lines_sorted[0] > avg_h_spacing * 0.5:
+                    # Missing border line at top - add it at position 0
+                    horizontal_lines_sorted.insert(0, 0)
+                if horizontal_lines_sorted[-1] < grid_height - avg_h_spacing * 0.5:
+                    # Missing border line at bottom - add it at grid_height - 1
+                    horizontal_lines_sorted.append(grid_height - 1)
+            
+            if len(vertical_lines_sorted) > 0:
+                if vertical_lines_sorted[0] > avg_v_spacing * 0.5:
+                    # Missing border line at left - add it at position 0
+                    vertical_lines_sorted.insert(0, 0)
+                if vertical_lines_sorted[-1] < grid_width - avg_v_spacing * 0.5:
+                    # Missing border line at right - add it at grid_width - 1
+                    vertical_lines_sorted.append(grid_width - 1)
+            
+            if self.debug:
+                print(f"Debug: Horizontal spacing - avg: {avg_h_spacing:.1f}, min: {min_h_spacing:.1f}, max: {max_h_spacing:.1f}")
+                print(f"Debug: Vertical spacing - avg: {avg_v_spacing:.1f}, min: {min_v_spacing:.1f}, max: {max_v_spacing:.1f}")
+            
+            # Estimate grid size from line count
+            # If spacing is relatively uniform, we likely detected all lines (L lines = L-1 cells)
+            # If spacing varies significantly, we might have missed some lines
+            spacing_variance_h = np.std(horizontal_spacings) / avg_h_spacing if len(horizontal_spacings) > 0 else 1.0
+            spacing_variance_v = np.std(vertical_spacings) / avg_v_spacing if len(vertical_spacings) > 0 else 1.0
+            
+            # If variance is low (< 0.3), spacing is uniform, so L lines = L-1 cells
+            # If variance is high, we might have missed lines - try L lines = L cells
+            if spacing_variance_h < 0.3:
+                estimated_rows = len(horizontal_lines_sorted) - 1
+            else:
+                # Spacing varies - might have missed some lines
+                # Estimate from grid height and average spacing
+                estimated_rows = int(round(grid_height / avg_h_spacing))
+            
+            if spacing_variance_v < 0.3:
+                estimated_cols = len(vertical_lines_sorted) - 1
+            else:
+                # Spacing varies - might have missed some lines
+                # Estimate from grid width and average spacing
+                estimated_cols = int(round(grid_width / avg_v_spacing))
+            
+            if self.debug:
+                print(f"Debug: Estimated grid size: {estimated_rows}x{estimated_cols}")
+                print(f"Debug: Spacing variance - H: {spacing_variance_h:.3f}, V: {spacing_variance_v:.3f}")
+            
+            # Validate grid size
+            if estimated_rows < min_grid_size or estimated_rows > max_grid_size:
+                print(f"Error: Detected {estimated_rows} rows, which is outside valid range [{min_grid_size}, {max_grid_size}]")
+                return None
+            if estimated_cols < min_grid_size or estimated_cols > max_grid_size:
+                print(f"Error: Detected {estimated_cols} cols, which is outside valid range [{min_grid_size}, {max_grid_size}]")
+                return None
+            
+            # Use detected lines to calculate cell positions directly
+            # This is more accurate than assuming uniform spacing
+            # We need to ensure we have enough lines for the detected grid size
+            if len(horizontal_lines_sorted) >= estimated_rows + 1 and len(vertical_lines_sorted) >= estimated_cols + 1:
+                # We have enough lines - use them directly
+                # Calculate average cell dimensions from detected lines first
+                if estimated_rows > 0 and len(horizontal_lines_sorted) >= 2:
+                    total_h_spacing = horizontal_lines_sorted[-1] - horizontal_lines_sorted[0]
+                    cell_height = total_h_spacing / estimated_rows
                 else:
-                    estimated_rows = max(min_grid_size, min(max_grid_size, best_k))
-                    estimated_cols = estimated_rows
-            
-            if estimated_rows is None or estimated_cols is None:
-                return None
-            
-            # Step 4: Calculate cell dimensions and positions
-            cell_width = grid_width / estimated_cols
-            cell_height = grid_height / estimated_rows
+                    cell_height = grid_height / estimated_rows
+                
+                if estimated_cols > 0 and len(vertical_lines_sorted) >= 2:
+                    total_v_spacing = vertical_lines_sorted[-1] - vertical_lines_sorted[0]
+                    cell_width = total_v_spacing / estimated_cols
+                else:
+                    cell_width = grid_width / estimated_cols
+                
+                # Now calculate cell positions using detected lines
+                cell_coordinates = []
+                for row_idx in range(estimated_rows):
+                    if row_idx + 1 < len(horizontal_lines_sorted):
+                        row_top = horizontal_lines_sorted[row_idx]
+                        row_bottom = horizontal_lines_sorted[row_idx + 1]
+                        row_center_y = grid_y + (row_top + row_bottom) / 2
+                    else:
+                        # Fallback: use uniform spacing for last row
+                        row_center_y = grid_y + (row_idx + 0.5) * cell_height
+                    
+                    for col_idx in range(estimated_cols):
+                        if col_idx + 1 < len(vertical_lines_sorted):
+                            col_left = vertical_lines_sorted[col_idx]
+                            col_right = vertical_lines_sorted[col_idx + 1]
+                            col_center_x = grid_x + (col_left + col_right) / 2
+                        else:
+                            # Fallback: use uniform spacing for last col
+                            col_center_x = grid_x + (col_idx + 0.5) * cell_width
+                        
+                        cell_coordinates.append((int(col_center_x), int(row_center_y)))
+            else:
+                # Not enough lines detected - use uniform spacing as fallback
+                cell_width = grid_width / estimated_cols
+                cell_height = grid_height / estimated_rows
+                
+                # Calculate cell center coordinates using uniform spacing
+                cell_coordinates = []
+                for row in range(estimated_rows):
+                    for col in range(estimated_cols):
+                        center_x = grid_x + (col + 0.5) * cell_width
+                        center_y = grid_y + (row + 0.5) * cell_height
+                        cell_coordinates.append((int(center_x), int(center_y)))
             
             # Validate cell dimensions
             min_cell_size = 20
             if cell_width < min_cell_size or cell_height < min_cell_size:
+                print(f"Warning: Cell size too small ({cell_width}x{cell_height})")
                 return None
-            
-            # Calculate cell center coordinates
-            cell_coordinates = []
-            for row in range(estimated_rows):
-                for col in range(estimated_cols):
-                    center_x = grid_x + (col + 0.5) * cell_width
-                    center_y = grid_y + (row + 0.5) * cell_height
-                    cell_coordinates.append((int(center_x), int(center_y)))
             
             result = {
                 'rows': estimated_rows,
@@ -211,14 +569,29 @@ class CrownsBoardAnalyzer:
                 debug_img = img_cv.copy()
                 cv2.rectangle(debug_img, (grid_x, grid_y), 
                             (grid_x + grid_width, grid_y + grid_height), (0, 255, 0), 2)
+                
+                # Draw detected lines
+                for line_y in horizontal_lines:
+                    cv2.line(debug_img, (grid_x, grid_y + line_y), 
+                           (grid_x + grid_width, grid_y + line_y), (255, 0, 0), 1)
+                for line_x in vertical_lines:
+                    cv2.line(debug_img, (grid_x + line_x, grid_y), 
+                           (grid_x + line_x, grid_y + grid_height), (255, 0, 0), 1)
+                
+                # Draw cell centers
                 for center_x, center_y in cell_coordinates:
                     cv2.circle(debug_img, (center_x, center_y), 5, (0, 0, 255), -1)
+                
                 cv2.imwrite('debug_grid.png', debug_img)
+                print(f"Debug: Detected {len(horizontal_lines)} horizontal lines, {len(vertical_lines)} vertical lines")
+                print(f"Debug: Grid size = {estimated_rows}x{estimated_cols}")
             
             return result
 
         except Exception as e:
             print(f"Error detecting grid: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     def get_cell_data(
@@ -256,86 +629,51 @@ class CrownsBoardAnalyzer:
             cell_height = grid_info['cell_height']
             grid_x, grid_y, grid_width, grid_height = grid_info['grid_bounds']
 
-            # Sample the exact center color of each cell
+            # Sample the exact center color of each cell (optimized)
             img_array = np.array(screenshot)
-            cell_colors = []
+            num_cells = len(cell_coordinates)
+            cell_colors = [None] * num_cells  # Pre-allocate to maintain order
+            sample_radius = 2  # Sample 2 pixels around center (5x5 area)
+            black_threshold = 50
             
+            # Process all coordinates in order
             for idx, (center_x, center_y) in enumerate(cell_coordinates):
-                # Sample the exact center pixel (or a very small area around center)
-                # Use a small 3x3 or 5x5 area to avoid grid lines
-                sample_radius = 2  # Sample 2 pixels around center (5x5 area)
-                x1 = max(0, int(center_x) - sample_radius)
-                y1 = max(0, int(center_y) - sample_radius)
-                x2 = min(img_array.shape[1], int(center_x) + sample_radius + 1)
-                y2 = min(img_array.shape[0], int(center_y) + sample_radius + 1)
-
-                # Get the center pixel color directly
-                if 0 <= int(center_y) < img_array.shape[0] and 0 <= int(center_x) < img_array.shape[1]:
-                    # Sample a small area and get the median color (more robust than mean)
+                cx, cy = int(center_x), int(center_y)
+                
+                if 0 <= cy < img_array.shape[0] and 0 <= cx < img_array.shape[1]:
+                    x1 = max(0, cx - sample_radius)
+                    y1 = max(0, cy - sample_radius)
+                    x2 = min(img_array.shape[1], cx + sample_radius + 1)
+                    y2 = min(img_array.shape[0], cy + sample_radius + 1)
+                    
                     sample_region = img_array[y1:y2, x1:x2]
                     
-                    if sample_region.size > 0:
-                        # Check if sample_region is RGB (3 channels) or grayscale
-                        if len(sample_region.shape) == 3 and sample_region.shape[2] == 3:
-                            # RGB image - reshape to (N, 3)
-                            pixels = sample_region.reshape(-1, 3)
-                        elif len(sample_region.shape) == 2:
-                            # Grayscale - convert to RGB by repeating
-                            pixels = np.stack([sample_region.flatten(), sample_region.flatten(), sample_region.flatten()], axis=1)
+                    if sample_region.size > 0 and len(sample_region.shape) == 3 and sample_region.shape[2] == 3:
+                        # RGB image - vectorized processing
+                        pixels = sample_region.reshape(-1, 3)
+                        # Filter out dark pixels (grid lines) and get median color
+                        bright_mask = np.any(pixels > black_threshold, axis=1)
+                        if np.any(bright_mask):
+                            center_color = np.median(pixels[bright_mask], axis=0)
                         else:
-                            # Unexpected shape - use center pixel directly
-                            center_color = img_array[int(center_y), int(center_x)]
-                            if len(center_color.shape) == 0 or len(center_color) != 3:
-                                # Fallback to RGB conversion
-                                if len(center_color.shape) == 0:
-                                    center_color = np.array([center_color, center_color, center_color])
-                                else:
-                                    center_color = np.array([center_color[0] if len(center_color) > 0 else 0,
-                                                           center_color[1] if len(center_color) > 1 else 0,
-                                                           center_color[2] if len(center_color) > 2 else 0])
-                            cell_colors.append(center_color)
-                            continue
-                        
-                        # Filter out very dark pixels (grid lines) and get median color
-                        black_threshold = 50
-                        bright_pixels = pixels[np.any(pixels > black_threshold, axis=1)]
-                        
-                        if len(bright_pixels) > 0:
-                            # Use median for robustness against outliers
-                            center_color = np.median(bright_pixels, axis=0)
-                        else:
-                            # If all pixels are dark, use median of all pixels
                             center_color = np.median(pixels, axis=0)
                         
-                        # Ensure center_color is a 1D array with 3 elements (RGB)
-                        center_color = np.asarray(center_color).flatten()
-                        if len(center_color) != 3:
-                            if len(center_color) == 1:
-                                center_color = np.array([center_color[0], center_color[0], center_color[0]])
-                            elif len(center_color) == 2:
-                                center_color = np.array([center_color[0], center_color[1], center_color[1]])
-                            else:
-                                center_color = center_color[:3]
+                        # Ensure 3-element RGB array
+                        center_color = np.asarray(center_color).flatten()[:3]
+                        if len(center_color) < 3:
+                            center_color = np.pad(center_color, (0, 3 - len(center_color)), mode='edge')[:3]
                         
-                        cell_colors.append(center_color)
+                        cell_colors[idx] = center_color.astype(int).tolist()
                     else:
                         # Fallback: use exact center pixel
-                        center_color = img_array[int(center_y), int(center_x)]
-                        # Ensure it's a 1D array with 3 elements
-                        center_color = np.asarray(center_color).flatten()
-                        if len(center_color) != 3:
-                            if len(center_color) == 0:
-                                center_color = np.array([0, 0, 0])
-                            elif len(center_color) == 1:
-                                center_color = np.array([center_color[0], center_color[0], center_color[0]])
-                            elif len(center_color) == 2:
-                                center_color = np.array([center_color[0], center_color[1], center_color[1]])
-                            else:
-                                center_color = center_color[:3]
-                        cell_colors.append(center_color)
+                        center_color = img_array[cy, cx]
+                        center_color = np.asarray(center_color).flatten()[:3]
+                        if len(center_color) < 3:
+                            center_color = np.pad(center_color, (0, 3 - len(center_color)), mode='edge')[:3]
+                        cell_colors[idx] = center_color.astype(int).tolist()
                 else:
                     # Invalid coordinates
-                    cell_colors.append([0, 0, 0])
+                    cell_colors[idx] = [0, 0, 0]
             
             # Build simple cell data structure: list of dicts with row, col, coordinates, and color
             cell_data = []

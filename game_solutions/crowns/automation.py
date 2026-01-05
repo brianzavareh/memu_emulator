@@ -10,6 +10,7 @@ This script automates playing the Crowns puzzle game by:
 
 import sys
 import time
+import os
 from pathlib import Path
 from typing import Optional, List, Tuple
 
@@ -21,6 +22,24 @@ if str(project_root) not in sys.path:
 from android_controller import BlueStacksController
 from game_solutions.crowns.solver import solve_crowns_puzzle, validate_solution
 from game_solutions.crowns.analyzer import CrownsBoardAnalyzer
+
+
+def _cleanup_png_files():
+    """
+    Clean up PNG files created during automation.
+    
+    Removes:
+    - crowns_board.png (screenshot of game board)
+    - debug_grid.png (debug visualization from analyzer)
+    """
+    png_files = ["crowns_board.png", "debug_grid.png"]
+    for png_file in png_files:
+        try:
+            if os.path.exists(png_file):
+                os.remove(png_file)
+                print(f"Cleaned up: {png_file}")
+        except Exception as e:
+            print(f"Warning: Could not remove {png_file}: {e}")
 
 
 def find_and_open_crowns_game(controller: BlueStacksController, vm_index: int) -> bool:
@@ -42,25 +61,15 @@ def find_and_open_crowns_game(controller: BlueStacksController, vm_index: int) -
     print("Searching for 'Crowns' game...")
     
     # Try to find "Crowns" text (case-insensitive, partial match)
+    # find_and_tap_text already does the UI dump, so no need for redundant fallback
     if controller.find_and_tap_text(vm_index, "Crowns", exact_match=False, case_sensitive=False):
         print("Successfully tapped on 'Crowns'!")
-        time.sleep(2)  # Wait for game to load
+        # Reduced wait - game should load quickly, we'll verify with screenshot later
+        time.sleep(0.5)
         return True
     else:
-        print("Could not find 'Crowns' text in the UI.")
-        # Try to find coordinates for debugging
-        coords = controller.find_text_coordinates(vm_index, "Crowns")
-        if coords:
-            print(f"Found 'Crowns' at center: {coords['center']}")
-            print(f"Bounds: {coords['bounds']}")
-            print("Attempting manual tap...")
-            center_x, center_y = coords['center']
-            controller.tap(vm_index, center_x, center_y)
-            time.sleep(2)
-            return True
-        else:
-            print("Text 'Crowns' not found in UI hierarchy.")
-            return False
+        print("Error: Could not find 'Crowns' text in the UI.")
+        return False
 
 
 def analyze_game_board(
@@ -89,7 +98,8 @@ def analyze_game_board(
         Tuple of (grid_info, regions, cell_coordinates) or None if analysis fails.
     """
     print("\nTaking screenshot of game board...")
-    screenshot = controller.take_screenshot_image(vm_index, refresh_display=True)
+    # Only refresh display if needed (skip refresh for faster processing)
+    screenshot = controller.take_screenshot_image(vm_index, refresh_display=False)
     
     if screenshot is None:
         print("Error: Failed to take screenshot.")
@@ -122,26 +132,37 @@ def analyze_game_board(
     for i, cell in enumerate(cell_data[:5]):
         print(f"  Cell ({cell['row']}, {cell['col']}): center=({cell['center_x']}, {cell['center_y']}), color={cell['color']}")
     
-    # Build regions matrix from cell data by clustering colors
-    # Group cells with similar colors into regions
-    from sklearn.cluster import KMeans
+    # Build regions matrix from cell data by grouping similar colors
+    # Use fast color quantization instead of KMeans (much faster: O(n) vs O(n*k*iterations))
     import numpy as np
     
     # Extract colors
     colors = np.array([cell['color'] for cell in cell_data])
     
-    # Cluster into 9 regions
-    print("\nClustering colors into 9 regions...")
-    kmeans = KMeans(n_clusters=9, random_state=42, n_init=10)
-    region_labels = kmeans.fit_predict(colors)
+    # Fast color quantization: round colors to nearest values to group similar colors
+    # This is much faster than KMeans and works perfectly for distinct region colors
+    print("\nGrouping colors into regions using fast quantization...")
+    quantization_step = 25  # Round colors to nearest 25 (adjustable based on color variation)
+    quantized_colors = (colors // quantization_step) * quantization_step
+    
+    # Map quantized colors to region IDs
+    color_to_region = {}
+    region_id = 0
+    
+    for quantized_color in quantized_colors:
+        color_tuple = tuple(quantized_color)
+        if color_tuple not in color_to_region:
+            color_to_region[color_tuple] = region_id
+            region_id += 1
     
     # Build regions matrix
     rows = grid_info['rows']
     cols = grid_info['cols']
     regions = [[0 for _ in range(cols)] for _ in range(rows)]
     
-    for cell, label in zip(cell_data, region_labels):
-        regions[cell['row']][cell['col']] = int(label)
+    for cell, quantized_color in zip(cell_data, quantized_colors):
+        color_tuple = tuple(quantized_color)
+        regions[cell['row']][cell['col']] = color_to_region[color_tuple]
     
     # Count unique regions
     unique_regions = set()
@@ -163,7 +184,7 @@ def solve_and_place_crowns(
     grid_info: dict,
     regions: List[List[int]],
     cell_coordinates: List[List[Tuple[int, int]]],
-    delay_between_taps: float = 0.5
+    delay_between_taps: float = 0.1
 ) -> bool:
     """
     Solve the puzzle and place crowns by tapping on cells.
@@ -234,31 +255,29 @@ def main():
     controller = BlueStacksController()
     vm_index = 0  # Default VM index
 
-    # Check VM status
+    # Quick VM status check - skip detailed check if we can connect directly
     print("\nChecking VM status...")
-    vm_status = controller.get_vm_status(vm_index)
-
-    if not vm_status['running']:
-        print(f"Error: VM instance {vm_index} is not running.")
-        print("Please start the emulator manually.")
-        return 1
-
-    if not vm_status['adb_connected']:
-        print("Connecting to VM via ADB...")
-        if not controller.connect_adb(vm_index):
+    # Try quick ADB connection first (faster than full status check)
+    if not controller.connect_adb(vm_index):
+        # If quick connect fails, do full status check
+        vm_status = controller.get_vm_status(vm_index)
+        if not vm_status['running']:
+            print(f"Error: VM instance {vm_index} is not running.")
+            print("Please start the emulator manually.")
+            return 1
+        if not vm_status['adb_connected']:
             print("Error: Failed to connect via ADB.")
             return 1
-        print("ADB connected successfully.")
-        time.sleep(1)
+    print("VM ready.")
 
     # Find and open the game
     if not find_and_open_crowns_game(controller, vm_index):
         print("Error: Could not open Crowns game.")
         return 1
 
-    # Wait a bit more for game to fully load
+    # Wait for game to load - use shorter delay, verify with screenshot
     print("Waiting for game to load...")
-    time.sleep(3)
+    time.sleep(1)  # Reduced from 3s - game loads quickly
 
     # Initialize analyzer
     analyzer = CrownsBoardAnalyzer(debug=True)
@@ -291,6 +310,9 @@ def main():
     print("\n" + "=" * 80)
     print("Automation completed successfully!")
     print("=" * 80)
+    
+    # Clean up PNG files after successful run
+    _cleanup_png_files()
 
     return 0
 
