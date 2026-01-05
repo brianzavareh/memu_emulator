@@ -33,7 +33,8 @@ class CrownsBoardAnalyzer:
     def _detect_grid_lines(
         self,
         grid_region: np.ndarray,
-        is_horizontal: bool = True
+        is_horizontal: bool = True,
+        estimated_grid_size: Optional[int] = None
     ) -> List[int]:
         """
         Detect grid lines using OpenCV-recommended morphological operations method.
@@ -41,6 +42,10 @@ class CrownsBoardAnalyzer:
         This method uses MORPH_OPEN to extract horizontal/vertical lines separately,
         which works robustly even with varying line thickness (thick region borders
         and thin internal grid lines).
+        
+        Parameters are dynamically adjusted based on grid size:
+        - Small grids (5x5): thick lines = larger block size, thicker kernels, more iterations
+        - Large grids (15x15): thin lines = smaller block size, thinner kernels, fewer iterations
         
         Based on OpenCV tutorial: Morphological Line Detection
         https://docs.opencv.org/master/dd/dd7/tutorial_morph_lines_detection.html
@@ -53,29 +58,69 @@ class CrownsBoardAnalyzer:
             If True, detect horizontal lines (project along rows).
             If False, detect vertical lines (project along columns).
             Default is True.
+        estimated_grid_size : Optional[int], optional
+            Estimated grid size (e.g., 5, 9, 15). Used to adapt parameters.
+            If None, will estimate from grid dimensions.
         
         Returns
         -------
         List[int]
             List of line positions (row indices for horizontal, col indices for vertical).
         """
+        # Estimate grid size if not provided
+        if estimated_grid_size is None:
+            if is_horizontal:
+                grid_dimension = grid_region.shape[0]
+            else:
+                grid_dimension = grid_region.shape[1]
+            # Estimate from dimension (assume grid is between 3x3 and 15x15)
+            # Use average cell size estimate
+            possible_sizes = list(range(3, 16))
+            avg_cell_size = np.mean([grid_dimension / size for size in possible_sizes])
+            estimated_grid_size = int(round(grid_dimension / avg_cell_size))
+            estimated_grid_size = max(3, min(15, estimated_grid_size))
+        
+        # Calculate adaptive parameters based on grid size
+        # Small grids (5x5) have thick lines, large grids (15x15) have thin lines
+        if estimated_grid_size <= 6:
+            # Small grid: thick lines
+            block_size = max(21, int(grid_region.shape[0] / estimated_grid_size * 0.3))
+            if block_size % 2 == 0:
+                block_size += 1  # Must be odd
+            c_value = 5  # Higher C for better contrast
+            kernel_thickness = 2  # Thicker kernel for thick lines
+            morph_iterations = 3  # More iterations for thick lines
+        elif estimated_grid_size <= 10:
+            # Medium grid: medium lines
+            block_size = max(15, int(grid_region.shape[0] / estimated_grid_size * 0.25))
+            if block_size % 2 == 0:
+                block_size += 1
+            c_value = 3
+            kernel_thickness = 1
+            morph_iterations = 2
+        else:
+            # Large grid: thin lines
+            block_size = max(9, int(grid_region.shape[0] / estimated_grid_size * 0.2))
+            if block_size % 2 == 0:
+                block_size += 1
+            c_value = 2
+            kernel_thickness = 1
+            morph_iterations = 1
+        
         # Step 1: Apply adaptive thresholding (handles varying lighting)
-        # This is better than Otsu for grids with varying backgrounds
+        # Block size adapts to grid size - larger for small grids, smaller for large grids
         binary = cv2.adaptiveThreshold(
             grid_region,
             255,
             cv2.ADAPTIVE_THRESH_MEAN_C,
             cv2.THRESH_BINARY_INV,  # Invert so dark lines become white
-            15,  # Block size - should be odd, adjust based on cell size
-            2    # C constant subtracted from mean
+            block_size,
+            c_value
         )
         
         # Step 2: Define structuring elements for morphological operations
         # The key is to use LONG kernels in the direction we want to extract
-        # For horizontal lines: kernel is wide (many pixels) but only 1 pixel tall
-        # For vertical lines: kernel is tall (many pixels) but only 1 pixel wide
-        # This extracts lines regardless of their thickness!
-        
+        # Kernel thickness adapts to grid size (thicker for small grids)
         # Calculate kernel length based on grid size
         # Should be long enough to span multiple cells but not too long
         if is_horizontal:
@@ -84,7 +129,7 @@ class CrownsBoardAnalyzer:
             kernel_length = max(25, kernel_length)  # At least 25 pixels
             horizontal_kernel = cv2.getStructuringElement(
                 cv2.MORPH_RECT, 
-                (kernel_length, 1)  # Wide but only 1 pixel tall
+                (kernel_length, kernel_thickness)  # Wide, thickness adapts to grid size
             )
             
             # Use MORPH_OPEN to extract horizontal lines
@@ -94,7 +139,7 @@ class CrownsBoardAnalyzer:
                 binary,
                 cv2.MORPH_OPEN,
                 horizontal_kernel,
-                iterations=2  # Apply multiple times for better extraction
+                iterations=morph_iterations  # Adapts to grid size
             )
         else:
             # Vertical kernel: tall enough to span most of the grid height
@@ -102,7 +147,7 @@ class CrownsBoardAnalyzer:
             kernel_length = max(25, kernel_length)  # At least 25 pixels
             vertical_kernel = cv2.getStructuringElement(
                 cv2.MORPH_RECT,
-                (1, kernel_length)  # Tall but only 1 pixel wide
+                (kernel_thickness, kernel_length)  # Tall, thickness adapts to grid size
             )
             
             # Use MORPH_OPEN to extract vertical lines
@@ -110,7 +155,7 @@ class CrownsBoardAnalyzer:
                 binary,
                 cv2.MORPH_OPEN,
                 vertical_kernel,
-                iterations=2  # Apply multiple times for better extraction
+                iterations=morph_iterations  # Adapts to grid size
             )
         
         # Step 3: Project along the appropriate axis to find line positions
@@ -131,19 +176,23 @@ class CrownsBoardAnalyzer:
         
         
         # Estimate expected cell size for peak detection window
-        # Try to detect grid size first by looking at spacing
+        # Use the estimated grid size to calculate cell size more accurately
         if is_horizontal:
             grid_dimension = grid_region.shape[0]
         else:
             grid_dimension = grid_region.shape[1]
         
-        # Estimate cell size (assume grid is between 3x3 and 15x15)
-        # Use average of possible cell sizes
-        possible_sizes = list(range(3, 16))
-        estimated_cell_size = int(np.mean([grid_dimension / size for size in possible_sizes]))
+        # Calculate cell size based on estimated grid size
+        estimated_cell_size = int(grid_dimension / estimated_grid_size)
         
-        # Window size for peak detection should be smaller than cell size
-        window_size = max(3, estimated_cell_size // 4)
+        # Window size for peak detection adapts to grid size
+        # Small grids: larger window (thick lines), large grids: smaller window (thin lines)
+        if estimated_grid_size <= 6:
+            window_size = max(5, estimated_cell_size // 3)  # Larger window for thick lines
+        elif estimated_grid_size <= 10:
+            window_size = max(3, estimated_cell_size // 4)
+        else:
+            window_size = max(2, estimated_cell_size // 5)  # Smaller window for thin lines
         
         # Smooth the projection to reduce noise
         smooth_kernel_size = max(3, window_size)
@@ -190,8 +239,13 @@ class CrownsBoardAnalyzer:
                     line_positions.append(i)
         
         # Step 6: Filter out lines that are too close together
-        # Minimum spacing should be at least 1/4 of estimated cell size
-        min_spacing = max(3, estimated_cell_size // 4)
+        # Minimum spacing adapts to grid size
+        if estimated_grid_size <= 6:
+            min_spacing = max(5, estimated_cell_size // 3)  # Larger spacing for thick lines
+        elif estimated_grid_size <= 10:
+            min_spacing = max(3, estimated_cell_size // 4)
+        else:
+            min_spacing = max(2, estimated_cell_size // 5)  # Smaller spacing for thin lines
         filtered_positions = self._filter_close_values(line_positions, threshold=min_spacing)
         
         return filtered_positions
@@ -374,58 +428,90 @@ class CrownsBoardAnalyzer:
                 print("Error: Grid region is empty")
                 return None
             
-            # Detect horizontal lines (rows)
-            horizontal_lines = self._detect_grid_lines(grid_region, is_horizontal=True)
-            # Detect vertical lines (columns)
-            vertical_lines = self._detect_grid_lines(grid_region, is_horizontal=False)
+            # NEW APPROACH: Since grid boundaries are FIXED, try all possible grid sizes
+            # and find which one best matches the detected line pattern
+            # For each grid size N, we expect N+1 lines (N-1 internal + 2 borders)
             
-            if self.debug:
-                print(f"Debug: Initially detected {len(horizontal_lines)} horizontal lines, {len(vertical_lines)} vertical lines")
-                print(f"Debug: Horizontal lines: {horizontal_lines[:10] if len(horizontal_lines) > 10 else horizontal_lines}")
-                print(f"Debug: Vertical lines: {vertical_lines[:10] if len(vertical_lines) > 10 else vertical_lines}")
+            best_grid_size = None
+            best_score = -1
+            best_h_lines = None
+            best_v_lines = None
             
-            # Grid size = number of lines - 1 (lines separate cells)
-            # For a grid with N cells, there are N+1 lines (including borders)
-            # So if we detect L lines, we have L-1 cells
-            # However, we might not detect border lines, so we need to be careful
+            # Try each possible grid size
+            for test_size in range(min_grid_size, max_grid_size + 1):
+                # Detect lines with parameters optimized for this grid size
+                h_lines = self._detect_grid_lines(grid_region, is_horizontal=True, estimated_grid_size=test_size)
+                v_lines = self._detect_grid_lines(grid_region, is_horizontal=False, estimated_grid_size=test_size)
+                
+                if len(h_lines) < 2 or len(v_lines) < 2:
+                    continue
+                
+                # Calculate expected spacing for this grid size
+                expected_spacing_h = grid_height / test_size
+                expected_spacing_v = grid_width / test_size
+                
+                # Score this grid size based on:
+                # 1. Number of lines detected (should be close to test_size+1)
+                # 2. Regularity of spacing (should match expected spacing)
+                h_sorted = sorted(h_lines)
+                v_sorted = sorted(v_lines)
+                
+                # Calculate actual spacings
+                h_spacings = np.diff(h_sorted) if len(h_sorted) > 1 else []
+                v_spacings = np.diff(v_sorted) if len(v_sorted) > 1 else []
+                
+                if len(h_spacings) == 0 or len(v_spacings) == 0:
+                    continue
+                
+                # Score based on spacing regularity
+                h_spacing_score = 1.0 / (1.0 + np.std(h_spacings) / np.mean(h_spacings)) if np.mean(h_spacings) > 0 else 0
+                v_spacing_score = 1.0 / (1.0 + np.std(v_spacings) / np.mean(v_spacings)) if np.mean(v_spacings) > 0 else 0
+                
+                # Score based on how close spacing is to expected
+                h_expected_score = 1.0 / (1.0 + abs(np.mean(h_spacings) - expected_spacing_h) / expected_spacing_h) if expected_spacing_h > 0 else 0
+                v_expected_score = 1.0 / (1.0 + abs(np.mean(v_spacings) - expected_spacing_v) / expected_spacing_v) if expected_spacing_v > 0 else 0
+                
+                # Score based on number of lines (should be test_size+1, but allow some tolerance)
+                expected_lines = test_size + 1
+                h_line_count_score = 1.0 / (1.0 + abs(len(h_lines) - expected_lines) / expected_lines)
+                v_line_count_score = 1.0 / (1.0 + abs(len(v_lines) - expected_lines) / expected_lines)
+                
+                # Combined score
+                total_score = (h_spacing_score + v_spacing_score + h_expected_score + v_expected_score + 
+                             h_line_count_score + v_line_count_score) / 6.0
+                
+                if self.debug:
+                    print(f"Debug: Testing grid size {test_size}x{test_size}: "
+                          f"h_lines={len(h_lines)}, v_lines={len(v_lines)}, "
+                          f"score={total_score:.3f}")
+                
+                if total_score > best_score:
+                    best_score = total_score
+                    best_grid_size = test_size
+                    best_h_lines = h_lines
+                    best_v_lines = v_lines
             
-            # Filter lines to get the main grid pattern
-            # Use clustering to find the dominant spacing pattern
-            if len(horizontal_lines) >= 2:
-                horizontal_lines = self._cluster_and_filter_lines(
-                    horizontal_lines, min_grid_size, max_grid_size
-                )
-            if len(vertical_lines) >= 2:
-                vertical_lines = self._cluster_and_filter_lines(
-                    vertical_lines, min_grid_size, max_grid_size
-                )
-            
-            if self.debug:
-                print(f"Debug: After filtering: {len(horizontal_lines)} horizontal lines, {len(vertical_lines)} vertical lines")
-            
-            # Check if we have enough lines to detect grid
-            if len(horizontal_lines) < 2 or len(vertical_lines) < 2:
-                print(f"Error: Not enough lines detected. Horizontal: {len(horizontal_lines)}, Vertical: {len(vertical_lines)}")
-                print("Cannot determine grid size without sufficient line detection.")
+            if best_grid_size is None:
+                print("Error: Could not determine grid size from line detection.")
                 return None
             
-            # Sort lines to ensure proper order
-            horizontal_lines_sorted = sorted(horizontal_lines)
-            vertical_lines_sorted = sorted(vertical_lines)
+            if self.debug:
+                print(f"Debug: Best grid size: {best_grid_size}x{best_grid_size} (score: {best_score:.3f})")
+                print(f"Debug: Detected {len(best_h_lines)} horizontal lines, {len(best_v_lines)} vertical lines")
             
-            # Calculate spacing between consecutive lines to determine if borders are missing
+            # Use the best detected lines
+            horizontal_lines_sorted = sorted(best_h_lines)
+            vertical_lines_sorted = sorted(best_v_lines)
+            
+            # Calculate spacing between consecutive lines FIRST (before adding borders)
             if len(horizontal_lines_sorted) > 1:
                 horizontal_spacings = [
                     horizontal_lines_sorted[i+1] - horizontal_lines_sorted[i]
                     for i in range(len(horizontal_lines_sorted) - 1)
                 ]
                 avg_h_spacing = np.mean(horizontal_spacings)
-                min_h_spacing = np.min(horizontal_spacings)
-                max_h_spacing = np.max(horizontal_spacings)
             else:
-                avg_h_spacing = grid_height / 10  # Rough estimate
-                min_h_spacing = avg_h_spacing
-                max_h_spacing = avg_h_spacing
+                avg_h_spacing = grid_height / best_grid_size if best_grid_size > 0 else grid_height / 15
             
             if len(vertical_lines_sorted) > 1:
                 vertical_spacings = [
@@ -433,78 +519,51 @@ class CrownsBoardAnalyzer:
                     for i in range(len(vertical_lines_sorted) - 1)
                 ]
                 avg_v_spacing = np.mean(vertical_spacings)
-                min_v_spacing = np.min(vertical_spacings)
-                max_v_spacing = np.max(vertical_spacings)
             else:
-                avg_v_spacing = grid_width / 10  # Rough estimate
-                min_v_spacing = avg_v_spacing
-                max_v_spacing = avg_v_spacing
+                avg_v_spacing = grid_width / best_grid_size if best_grid_size > 0 else grid_width / 15
             
-            # Check if we're missing border lines at the edges
-            # If first line is far from 0 (more than half average spacing), add border line
-            # If last line is far from grid_size-1 (more than half average spacing), add border line
-            if len(horizontal_lines_sorted) > 0:
-                if horizontal_lines_sorted[0] > avg_h_spacing * 0.5:
-                    # Missing border line at top - add it at position 0
-                    horizontal_lines_sorted.insert(0, 0)
-                if horizontal_lines_sorted[-1] < grid_height - avg_h_spacing * 0.5:
-                    # Missing border line at bottom - add it at grid_height - 1
-                    horizontal_lines_sorted.append(grid_height - 1)
+            # Add border lines based on POSITION, not count
+            # Check if top border is missing (first line is not near 0)
+            border_threshold = avg_h_spacing * 0.3
+            if len(horizontal_lines_sorted) == 0 or horizontal_lines_sorted[0] > border_threshold:
+                horizontal_lines_sorted.insert(0, 0)
             
-            if len(vertical_lines_sorted) > 0:
-                if vertical_lines_sorted[0] > avg_v_spacing * 0.5:
-                    # Missing border line at left - add it at position 0
-                    vertical_lines_sorted.insert(0, 0)
-                if vertical_lines_sorted[-1] < grid_width - avg_v_spacing * 0.5:
-                    # Missing border line at right - add it at grid_width - 1
-                    vertical_lines_sorted.append(grid_width - 1)
+            # Check if bottom border is missing (last line is not near grid_height)
+            if len(horizontal_lines_sorted) == 0 or horizontal_lines_sorted[-1] < grid_height - border_threshold:
+                horizontal_lines_sorted.append(grid_height - 1)
             
-            if self.debug:
-                print(f"Debug: Horizontal spacing - avg: {avg_h_spacing:.1f}, min: {min_h_spacing:.1f}, max: {max_h_spacing:.1f}")
-                print(f"Debug: Vertical spacing - avg: {avg_v_spacing:.1f}, min: {min_v_spacing:.1f}, max: {max_v_spacing:.1f}")
+            # Check if left border is missing
+            if len(vertical_lines_sorted) == 0 or vertical_lines_sorted[0] > border_threshold:
+                vertical_lines_sorted.insert(0, 0)
             
-            # Estimate grid size from line count
-            # If spacing is relatively uniform, we likely detected all lines (L lines = L-1 cells)
-            # If spacing varies significantly, we might have missed some lines
-            spacing_variance_h = np.std(horizontal_spacings) / avg_h_spacing if len(horizontal_spacings) > 0 else 1.0
-            spacing_variance_v = np.std(vertical_spacings) / avg_v_spacing if len(vertical_spacings) > 0 else 1.0
+            # Check if right border is missing
+            if len(vertical_lines_sorted) == 0 or vertical_lines_sorted[-1] < grid_width - border_threshold:
+                vertical_lines_sorted.append(grid_width - 1)
             
-            # Grid is always n×n square, so calculate size once and use for both dimensions
-            # If variance is low (< 0.3), spacing is uniform, so L lines = L-1 cells
-            # If variance is high, we might have missed lines - try L lines = L cells
+            # Recalculate grid size based on ACTUAL line count after adding borders
+            # Grid size = number of lines - 1 (since NxN grid has N+1 lines)
+            estimated_size_h = len(horizontal_lines_sorted) - 1
+            estimated_size_v = len(vertical_lines_sorted) - 1
             
-            # Calculate estimates for both dimensions
-            if spacing_variance_h < 0.3:
-                estimated_rows_from_h = len(horizontal_lines_sorted) - 1
+            # Use the average if they differ slightly, or the larger if they differ significantly
+            if abs(estimated_size_h - estimated_size_v) <= 1:
+                estimated_size = int(round((estimated_size_h + estimated_size_v) / 2))
             else:
-                # Spacing varies - might have missed some lines
-                # Estimate from grid height and average spacing
-                estimated_rows_from_h = int(round(grid_height / avg_h_spacing))
+                # If they differ significantly, use the one that matches the best_grid_size better
+                # or use the larger one (more likely to be correct)
+                estimated_size = max(estimated_size_h, estimated_size_v)
             
-            if spacing_variance_v < 0.3:
-                estimated_cols_from_v = len(vertical_lines_sorted) - 1
-            else:
-                # Spacing varies - might have missed lines
-                # Estimate from grid width and average spacing
-                estimated_cols_from_v = int(round(grid_width / avg_v_spacing))
+            # Ensure grid size is within valid range
+            estimated_size = max(min_grid_size, min(max_grid_size, estimated_size))
             
-            # Since grid is always square, use the average or the more reliable estimate
-            # Prefer the one with lower variance (more reliable)
-            if spacing_variance_h <= spacing_variance_v:
-                # Horizontal detection is more reliable
-                estimated_size = estimated_rows_from_h
-            else:
-                # Vertical detection is more reliable
-                estimated_size = estimated_cols_from_v
-            
-            # Ensure both dimensions are the same (square grid)
+            # Use the recalculated grid size
             estimated_rows = estimated_size
             estimated_cols = estimated_size
             
             if self.debug:
-                print(f"Debug: Estimated grid size (square): {estimated_rows}x{estimated_cols}")
-                print(f"Debug: Spacing variance - H: {spacing_variance_h:.3f}, V: {spacing_variance_v:.3f}")
-                print(f"Debug: Raw estimates - rows: {estimated_rows_from_h}, cols: {estimated_cols_from_v}")
+                print(f"Debug: Final grid size: {estimated_rows}x{estimated_cols}")
+                print(f"Debug: Final line counts - H: {len(horizontal_lines_sorted)}, V: {len(vertical_lines_sorted)}")
+                print(f"Debug: Average spacing - H: {avg_h_spacing:.1f}, V: {avg_v_spacing:.1f}")
             
             # Validate grid size
             if estimated_size < min_grid_size or estimated_size > max_grid_size:
@@ -585,10 +644,10 @@ class CrownsBoardAnalyzer:
                             (grid_x + grid_width, grid_y + grid_height), (0, 255, 0), 2)
                 
                 # Draw detected lines
-                for line_y in horizontal_lines:
+                for line_y in horizontal_lines_sorted:
                     cv2.line(debug_img, (grid_x, grid_y + line_y), 
                            (grid_x + grid_width, grid_y + line_y), (255, 0, 0), 1)
-                for line_x in vertical_lines:
+                for line_x in vertical_lines_sorted:
                     cv2.line(debug_img, (grid_x + line_x, grid_y), 
                            (grid_x + line_x, grid_y + grid_height), (255, 0, 0), 1)
                 
@@ -597,7 +656,7 @@ class CrownsBoardAnalyzer:
                     cv2.circle(debug_img, (center_x, center_y), 5, (0, 0, 255), -1)
                 
                 cv2.imwrite('debug_grid.png', debug_img)
-                print(f"Debug: Detected {len(horizontal_lines)} horizontal lines, {len(vertical_lines)} vertical lines")
+                print(f"Debug: Detected {len(horizontal_lines_sorted)} horizontal lines, {len(vertical_lines_sorted)} vertical lines")
                 print(f"Debug: Grid size = {estimated_rows}x{estimated_cols}")
             
             return result
