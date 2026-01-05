@@ -74,10 +74,15 @@ class CrownsBoardAnalyzer:
             else:
                 grid_dimension = grid_region.shape[1]
             # Estimate from dimension (assume grid is between 3x3 and 15x15)
-            # Use average cell size estimate
-            possible_sizes = list(range(3, 16))
-            avg_cell_size = np.mean([grid_dimension / size for size in possible_sizes])
-            estimated_grid_size = int(round(grid_dimension / avg_cell_size))
+            # Use heuristic based on typical cell sizes for Crowns game:
+            # Small grids (5x5): ~20-30 pixels per cell
+            # Medium grids (9x9): ~25-35 pixels per cell
+            # Large grids (15x15): ~25-40 pixels per cell
+            # Estimate using a typical cell size that scales with dimension
+            # For larger dimensions, assume larger grids with proportionally larger cells
+            typical_cell_size = 25 + (grid_dimension - 100) / 20  # Scales from ~25px at 100px to ~35px at 300px
+            typical_cell_size = max(20, min(40, typical_cell_size))  # Clamp to reasonable range
+            estimated_grid_size = int(round(grid_dimension / typical_cell_size))
             estimated_grid_size = max(3, min(15, estimated_grid_size))
         
         # Calculate adaptive parameters based on grid size

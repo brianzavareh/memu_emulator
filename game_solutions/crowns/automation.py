@@ -223,8 +223,14 @@ def main():
         if not vm_status['running']:
             print(f"Error: VM instance {vm_index} is not running.")
             return 1
+        # Even if status says ADB is connected, retry the connection to ensure it's actually working
+        # The status check may report connected based on device list, but the connection may not be functional
         if not vm_status['adb_connected']:
             print("Error: Failed to connect via ADB.")
+            return 1
+        # Status check passed, but original connect_adb failed - retry to ensure connection is established
+        if not controller.connect_adb(vm_index):
+            print("Error: Failed to establish ADB connection after status check.")
             return 1
 
     # Find and open the game
