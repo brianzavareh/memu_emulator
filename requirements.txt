@@ -3,4 +3,8 @@ numpy>=1.24.0
 opencv-python>=4.8.0
 boxdetect>=1.0.0
 scikit-learn>=1.0.0
+easyocr>=1.7.0
+pytesseract>=0.3.10
+# PyQt6>=6.5.0
+PyQt5>=5.15.0  # Alternative if PyQt6 has DLL issues
 
